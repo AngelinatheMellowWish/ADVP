@@ -1,0 +1,16 @@
+{
+  "name": "advp-tooling",
+  "version": "0.2.1",
+  "private": true,
+  "description": "Repository tooling for ADVP (docs, commitlint, markdownlint)",
+  "license": "Apache-2.0",
+  "scripts": {
+    "lint:md": "markdownlint-cli2 \"**/*.md\" \"#node_modules\" \"#build\"",
+    "commitlint": "commitlint --from HEAD~1 --to HEAD --verbose"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.6.0",
+    "@commitlint/config-conventional": "^19.6.0",
+    "markdownlint-cli2": "^0.14.0"
+  }
+}

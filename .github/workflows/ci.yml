@@ -1,0 +1,174 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: quality-gates
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install repository tooling
+        shell: pwsh
+        run: npm install --no-audit --no-fund
+
+      - name: Markdown lint
+        shell: pwsh
+        run: npx markdownlint-cli2 "**/*.md" "#node_modules" "#build"
+
+      - name: Link check (offline)
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --offline --no-progress --exclude-mail .
+          fail: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install documentation dependencies
+        shell: pwsh
+        run: python -m pip install --upgrade pip python-docx
+
+      - name: Validate prototype
+        shell: pwsh
+        run: python scripts/check_prototype.py
+
+      - name: Build Word document (validation artifact)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build | Out-Null
+          python scripts/build_docx.py --output "build/需求说明书.docx"
+
+      - name: Check version consistency
+        shell: pwsh
+        run: python scripts/check_version.py
+
+      - name: Detect backend
+        id: backend
+        shell: pwsh
+        run: |
+          if (Test-Path "backend/pyproject.toml") {
+            "exists=true" >> $env:GITHUB_OUTPUT
+          } else {
+            "exists=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Backend checks
+        if: steps.backend.outputs.exists == 'true'
+        shell: pwsh
+        run: |
+          python -m pip install uv
+          uv sync --project backend
+          uv run --project backend ruff check backend
+          uv run --project backend ruff format --check backend
+          uv run --project backend mypy backend
+          uv run --project backend pytest backend
+
+      - name: Detect frontend
+        id: frontend
+        shell: pwsh
+        run: |
+          if (Test-Path "frontend/package.json") {
+            "exists=true" >> $env:GITHUB_OUTPUT
+          } else {
+            "exists=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Frontend checks
+        if: steps.frontend.outputs.exists == 'true'
+        shell: pwsh
+        workdir: frontend
+        run: |
+          npm install --no-audit --no-fund
+          npm run lint
+          npm run typecheck
+          npm run test -- --run
+
+      - name: Upload documentation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: advp-docs
+          path: |
+            build/需求说明书.docx
+            docs/prototype/index.html
+          if-no-files-found: error
+
+  secret-scan:
+    name: secret-scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+  commitlint:
+    name: commitlint
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install tooling
+        run: npm install --no-audit --no-fund
+      - name: Lint commit messages
+        run: npx commitlint --from "${{ github.event.pull_request.base.sha }}" --to "${{ github.event.pull_request.head.sha }}" --verbose
+
+  dependency-audit:
+    name: dependency-audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python dependency audit
+        if: hashFiles('backend/pyproject.toml', 'backend/requirements.txt', 'backend/uv.lock') != ''
+        run: |
+          python -m pip install pip-audit uv
+          if [ -f backend/requirements.txt ]; then
+            pip-audit -r backend/requirements.txt
+          else
+            (cd backend && uv export --format requirements-txt --no-hashes > /tmp/advp-req.txt)
+            pip-audit -r /tmp/advp-req.txt
+          fi
+      - name: Node dependency audit
+        if: hashFiles('frontend/package-lock.json') != ''
+        working-directory: frontend
+        run: npm audit --audit-level=high
