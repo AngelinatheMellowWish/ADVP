@@ -10,6 +10,12 @@ Every logical change is one atomic commit, one patch version, and one entry belo
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-10-23
+
+### Changed
+
+- fix(ci): replace Windows-incompatible lychee action with local link checker
+
 ## [0.2.2] - 2026-10-23
 
 ### Changed

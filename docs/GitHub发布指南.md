@@ -3,12 +3,12 @@
 | 项目 | 内容 |
 |---|---|
 | 文档编号 | ADVP-OPS-001 |
-| 版本 | v0.2.2 |
+| 版本 | v0.2.3 |
 | 状态 | 待执行 |
 | 账号 | `AngelinatheMellowWish` |
 | 公开仓库 | `ADVP`（Public，脱敏快照） |
 | 私有仓库 | `Object1691`（Private，全量备份） |
-| 当前版本 | v0.2.2 |
+| 当前版本 | v0.2.3 |
 
 > 原则：私有仓库是唯一全量来源；公开仓库只能通过 `scripts/export_public.ps1` 白名单导出。任何时候都不要把当前私有工作树直接推到公开仓库。
 
@@ -18,7 +18,7 @@
 
 - 本机已安装 Git 与 GitHub CLI（`gh`）。
 - 已登录 GitHub 网页账号：`AngelinatheMellowWish`。
-- 当前项目目录为 `%USERPROFILE%\Object1691`，`main` 分支干净，已有 `v0.1.0`–`v0.2.2` tag。
+- 当前项目目录为 `%USERPROFILE%\Object1691`，`main` 分支干净，已有 `v0.1.0`–`v0.2.3` tag。
 - 已确认 `api_key.txt` 不存在；若曾包含真实密钥，先到供应商后台轮换。
 - 本机 Git 身份已配置（当前为 `AngelinatheMellowWish`）。
 
@@ -133,7 +133,7 @@ git ls-remote --tags https://github.com/AngelinatheMellowWish/ADVP.git
 
 - [ ] `Object1691` 为 Private，`ADVP` 为 Public。
 - [ ] 两个仓库的 `main` 均有最新 commit。
-- [ ] 私有仓库包含 `v0.1.0`–`v0.2.2`；公开仓库包含 `v0.2.2`（脱敏快照从该版本开始）。
+- [ ] 私有仓库包含 `v0.1.0`–`v0.2.3`；公开仓库包含 `v0.2.3`（脱敏快照从该版本开始）。
 - [ ] 公开仓库无 `api_key.txt`、`.env`、`node_modules`、`logs/`、`data/`、绝对路径。
 - [ ] 公开仓库 `LICENSE` 为 Apache-2.0，包含 `NOTICE` 与 `THIRD_PARTY_NOTICES.md`。
 - [ ] Actions 中 `quality-gates`、`secret-scan`、`commitlint`、`dependency-audit` 通过。
