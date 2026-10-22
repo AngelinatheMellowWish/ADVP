@@ -10,6 +10,9 @@ on:
 permissions:
   contents: read
 
+env:
+  PYTHONIOENCODING: utf-8
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -37,12 +40,6 @@ jobs:
         shell: pwsh
         run: npx markdownlint-cli2 "**/*.md" "#node_modules" "#build"
 
-      - name: Link check (offline)
-        uses: lycheeverse/lychee-action@v2
-        with:
-          args: --offline --no-progress --exclude-mail .
-          fail: true
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -65,6 +62,10 @@ jobs:
       - name: Check version consistency
         shell: pwsh
         run: python scripts/check_version.py
+
+      - name: Link check (offline)
+        shell: pwsh
+        run: python scripts/check_links.py
 
       - name: Detect backend
         id: backend
@@ -100,7 +101,7 @@ jobs:
       - name: Frontend checks
         if: steps.frontend.outputs.exists == 'true'
         shell: pwsh
-        workdir: frontend
+        working-directory: frontend
         run: |
           npm install --no-audit --no-fund
           npm run lint
