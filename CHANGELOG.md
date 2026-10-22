@@ -10,6 +10,12 @@ Every logical change is one atomic commit, one patch version, and one entry belo
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-10-23
+
+### Changed
+
+- docs(log): add 2026-10-22 development work record
+
 ## [0.2.4] - 2026-10-23
 
 ### Changed
