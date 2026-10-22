@@ -1,6 +1,6 @@
 {
   "name": "advp-tooling",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "private": true,
   "description": "Repository tooling for ADVP (docs, commitlint, markdownlint)",
   "license": "Apache-2.0",
