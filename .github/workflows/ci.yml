@@ -100,7 +100,7 @@ jobs:
       - name: Frontend checks
         if: steps.frontend.outputs.exists == 'true'
         shell: pwsh
-        workdir: frontend
+        working-directory: frontend
         run: |
           npm install --no-audit --no-fund
           npm run lint

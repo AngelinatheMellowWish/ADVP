@@ -10,6 +10,12 @@ Every logical change is one atomic commit, one patch version, and one entry belo
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-23
+
+### Changed
+
+- fix(ci): correct frontend working-directory and document private protection limit
+
 ## [0.2.1] - 2026-10-22
 
 ### Changed
