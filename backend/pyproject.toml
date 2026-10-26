@@ -1,0 +1,83 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "advp-backend"
+version = "0.8.238"
+description = "ADVP local backend service"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+dependencies = [
+  "astropy>=6.1,<8",
+  "boto3>=1.35,<2",
+  "charset-normalizer>=3.4,<4",
+  "confluent-kafka>=2.6,<3",
+  "fastapi>=0.115,<1",
+  "fastexcel>=0.12,<1",
+  "h5py>=3.12,<4",
+  "httpx>=0.28,<1",
+  "lxml>=5.3,<7",
+  "netCDF4>=1.7,<2",
+  "nibabel>=5.3,<6",
+  "numpy>=2.0,<3",
+  "pandas>=2.2,<4",
+  "pdfplumber>=0.11,<1",
+  "polars>=1.20,<2",
+  "pydicom>=3.0,<4",
+  "psycopg[binary]>=3.2,<4",
+  "pydantic>=2.10,<3",
+  "pydantic-settings>=2.7,<3",
+  "pymysql>=1.1,<2",
+  "python-docx>=1.1,<2",
+  "sqlalchemy>=2.0,<3",
+  "uvicorn[standard]>=0.34,<1",
+  "websockets>=14,<16",
+  "xarray>=2024.10,<2026",
+  "keyring>=25,<26",
+  "plotly>=6,<7",
+  "playwright>=1.50,<2",
+]
+
+[dependency-groups]
+dev = [
+  "mypy>=1.14,<2",
+  "openpyxl>=3.1,<4",
+  "psutil>=6.1,<7",
+  "pytest>=8.3,<9",
+  "pytest-xdist>=3.5,<4",
+  "reportlab>=4.2,<5",
+  "ruff>=0.9,<1",
+  "types-openpyxl>=3.1,<4",
+]
+
+[project.scripts]
+advp-launcher = "advp.launcher:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/advp"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q -m \"not real and not browser\""
+markers = [
+  "unit: no IO or browser",
+  "integration: API/TestClient with temporary database",
+  "e2e: multi-step pipeline",
+  "browser: Playwright/PDF/HTML export",
+  "real: real VTK/trame/1GB/OpenNeuro environment",
+  "serial: must not run concurrently",
+  "slow: exceeds the fast budget",
+]

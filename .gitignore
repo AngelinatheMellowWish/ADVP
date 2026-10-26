@@ -1,0 +1,61 @@
+# Secrets and local credentials
+api_key.txt
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv-3d/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/dist-share/
+frontend/.vite/
+coverage/
+*.tsbuildinfo
+
+# Runtime data and logs
+/logs/*
+!/logs/.gitkeep
+/workspace/
+/data/
+/derived/
+/exports/
+*.log
+
+# Office temporary files
+~$*.docx
+~$*.xlsx
+
+# Local generated previews
+docs/需求说明书.pdf
+
+# Local agent state
+.omo/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.local
