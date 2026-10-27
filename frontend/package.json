@@ -1,0 +1,50 @@
+{
+  "name": "advp-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "build:share": "node scripts/build-share.mjs",
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "@deck.gl/aggregation-layers": "^9.4.0",
+    "@deck.gl/core": "^9.4.0",
+    "@deck.gl/geo-layers": "^9.4.0",
+    "@deck.gl/layers": "^9.4.0",
+    "@deck.gl/react": "^9.4.0",
+    "@kitware/vtk.js": "^37.4.6",
+    "cytoscape": "^3.34.4",
+    "echarts": "^6.1.0",
+    "i18n-iso-countries": "^7.14.0",
+    "plotly.js-dist-min": "^4.1.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "topojson-client": "^3.1.0",
+    "world-atlas": "^2.0.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@types/node": "^22.10.5",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "@types/topojson-client": "^3.1.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^9.18.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-refresh": "^0.4.18",
+    "globals": "^15.14.0",
+    "jsdom": "^26.0.0",
+    "typescript": "~5.7.3",
+    "typescript-eslint": "^8.20.0",
+    "vite": "^6.0.7",
+    "vitest": "^3.0.0"
+  }
+}
