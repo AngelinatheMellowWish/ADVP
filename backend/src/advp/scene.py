@@ -7,11 +7,11 @@ import json
 from copy import deepcopy
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from advp.models import Dataset
 
-SCENE_VERSION = "1.0"
+SCENE_VERSION = "1.1"
 SUPPORTED_BACKENDS = {"auto", "webgl", "mayavi", "trame"}
 SUPPORTED_GEOMETRIES = {
     "points",
@@ -92,13 +92,58 @@ class SceneColormap(BaseModel):
     nanColor: str = "#808080"
 
 
+class SceneColorPoint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    x: float = Field(ge=0, le=1)
+    color: str = Field(pattern=r"^#[0-9A-Fa-f]{6}$")
+
+
+class SceneOpacityPoint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    x: float = Field(ge=0, le=1)
+    opacity: float = Field(ge=0, le=1)
+
+
+DEFAULT_COLOR_POINTS = (
+    (0.0, "#440154"),
+    (0.25, "#3b528b"),
+    (0.5, "#21918c"),
+    (0.75, "#5ec962"),
+    (1.0, "#fde725"),
+)
+DEFAULT_OPACITY_POINTS = ((0.0, 0.0), (0.5, 0.4), (1.0, 0.9))
+COLORMAP_STOPS: dict[str, tuple[str, ...]] = {
+    "viridis": tuple(color for _, color in DEFAULT_COLOR_POINTS),
+    "grayscale": ("#000000", "#404040", "#808080", "#c0c0c0", "#ffffff"),
+    "hot": ("#000000", "#ff0000", "#ffff00", "#ffffff"),
+    "jet": ("#000080", "#0080ff", "#00ffff", "#ffff00", "#ff0000"),
+}
+
+
+def _default_color_points() -> list[SceneColorPoint]:
+    return [SceneColorPoint(x=x, color=color) for x, color in DEFAULT_COLOR_POINTS]
+
+
+def _default_opacity_points() -> list[SceneOpacityPoint]:
+    return [SceneOpacityPoint(x=x, opacity=opacity) for x, opacity in DEFAULT_OPACITY_POINTS]
+
+
 class SceneTransferFunction(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    points: list[list[float]] = Field(
-        default_factory=lambda: [[0.0, 0.0], [0.5, 0.4], [1.0, 0.9]],
-        max_length=32,
+    colorPoints: list[SceneColorPoint] = Field(
+        default_factory=_default_color_points,
+        min_length=2,
+        max_length=64,
     )
+    opacityPoints: list[SceneOpacityPoint] = Field(
+        default_factory=_default_opacity_points,
+        min_length=2,
+        max_length=64,
+    )
+    interpolation: Literal["linear", "smooth"] = "linear"
 
 
 class SceneClipping(BaseModel):
@@ -164,6 +209,13 @@ def normalize_scene(payload: dict[str, Any], dataset: Dataset) -> SceneDocument:
     migrated = migrate_scene(payload)
     try:
         scene = SceneDocument.model_validate(migrated)
+    except ValidationError as exc:
+        if "transferFunction" in str(exc):
+            raise SceneError(
+                "invalid_transfer_function",
+                f"transfer function validation failed: {exc}",
+            ) from exc
+        raise SceneError("invalid_scene", f"scene validation failed: {exc}") from exc
     except Exception as exc:
         raise SceneError("invalid_scene", f"scene validation failed: {exc}") from exc
     _validate_scene(scene, dataset)
@@ -178,7 +230,7 @@ def migrate_scene(payload: dict[str, Any]) -> dict[str, Any]:
     version = str(scene.get("version") or "")
     if version == SCENE_VERSION:
         return scene
-    if version == "0.9":
+    if version in {"0.9", "1.0"}:
         scene["version"] = SCENE_VERSION
         scene.setdefault("sampling", {"maxElements": 50_000_000, "mode": "stride"})
         scene.setdefault(
@@ -186,6 +238,19 @@ def migrate_scene(payload: dict[str, Any]) -> dict[str, Any]:
             {"coordinateReference": None, "units": None, "dataRange": None},
         )
         scene.setdefault("backend", "auto")
+        scene.setdefault("lighting", {"ambient": 0.2, "diffuse": 0.8})
+        scene.setdefault("clipping", {"enabled": False, "planes": []})
+        scene.setdefault("annotations", [])
+        transfer = scene.get("transferFunction")
+        if not isinstance(transfer, dict) or "colorPoints" not in transfer:
+            migrated = _legacy_transfer_payload(scene.get("colormap"))
+            if isinstance(transfer, dict) and isinstance(transfer.get("points"), list):
+                migrated["opacityPoints"] = [
+                    {"x": float(point[0]), "opacity": float(point[1])}
+                    for point in transfer["points"]
+                    if isinstance(point, list) and len(point) == 2
+                ] or migrated["opacityPoints"]
+            scene["transferFunction"] = migrated
         return scene
     if version and version > SCENE_VERSION:
         raise SceneError(
@@ -196,6 +261,21 @@ def migrate_scene(payload: dict[str, Any]) -> dict[str, Any]:
         "unsupported_scene_version",
         f"scene version {version!r} is not supported",
     )
+
+
+def _legacy_transfer_payload(colormap: Any) -> dict[str, Any]:
+    name = "viridis"
+    if isinstance(colormap, dict) and isinstance(colormap.get("name"), str):
+        name = str(colormap["name"])
+    stops = COLORMAP_STOPS.get(name, COLORMAP_STOPS["viridis"])
+    color_points = [
+        {"x": index / max(1, len(stops) - 1), "color": color} for index, color in enumerate(stops)
+    ]
+    return {
+        "colorPoints": color_points,
+        "opacityPoints": [{"x": x, "opacity": opacity} for x, opacity in DEFAULT_OPACITY_POINTS],
+        "interpolation": "linear",
+    }
 
 
 def scene_hash(scene: SceneDocument | dict[str, Any]) -> str:
@@ -262,22 +342,18 @@ def _validate_scene(scene: SceneDocument, dataset: Dataset) -> None:
         raise SceneError("invalid_colormap", "colormap.range must be [min, max] with min < max")
     if not (colormap.nanColor.startswith("#") and len(colormap.nanColor) == 7):
         raise SceneError("invalid_colormap", "colormap.nanColor must be a #RRGGBB value")
-    previous_x = -1.0
-    for point in scene.transferFunction.points:
-        if len(point) != 2:
-            raise SceneError("invalid_transfer_function", "transfer points must be [x, y]")
-        x_value, y_value = point
-        if not (0 <= x_value <= 1 and 0 <= y_value <= 1):
-            raise SceneError(
-                "invalid_transfer_function",
-                "transfer points must be in the 0..1 range",
-            )
-        if x_value < previous_x:
-            raise SceneError(
-                "invalid_transfer_function",
-                "transfer points must be sorted by x",
-            )
-        previous_x = x_value
+    for name, points in (
+        ("colorPoints", scene.transferFunction.colorPoints),
+        ("opacityPoints", scene.transferFunction.opacityPoints),
+    ):
+        previous_x = -1.0
+        for point in points:
+            if point.x <= previous_x:
+                raise SceneError(
+                    "invalid_transfer_function",
+                    f"{name} must be strictly increasing with unique x values",
+                )
+            previous_x = point.x
     if scene.animation.resolution and len(scene.animation.resolution) != 2:
         raise SceneError("invalid_animation", "animation.resolution must have 2 values")
     if scene.sampling.maxElements <= 0:

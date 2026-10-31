@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { errorMessage } from '../api/projects'
-import type { GeometryPayload } from '../api/scenes'
+import type { GeometryPayload, SceneTransferFunction } from '../api/scenes'
 
 type VtkObject = { delete?: () => void }
 type VtkRenderWindow = { render: () => void; getInteractor?: () => unknown }
@@ -60,12 +60,14 @@ export function VtkScene({
   colormap = 'viridis',
   isovalue = 0.5,
   clipping = false,
+  transferFunction,
   onScreenshot,
 }: {
   geometry: GeometryPayload
   colormap?: string
   isovalue?: number
   clipping?: boolean
+  transferFunction?: SceneTransferFunction
   onScreenshot?: (dataUrl: string) => void
 }) {
   const container = useRef<HTMLDivElement>(null)
@@ -88,6 +90,7 @@ export function VtkScene({
       import('@kitware/vtk.js/Common/Core/Points'),
       import('@kitware/vtk.js/Common/Core/DataArray'),
       import('@kitware/vtk.js/Rendering/Core/ColorTransferFunction'),
+      import('@kitware/vtk.js/Common/DataModel/PiecewiseFunction'),
       import('@kitware/vtk.js/Rendering/Core/ImageMapper'),
       import('@kitware/vtk.js/Rendering/Core/ImageSlice'),
       import('@kitware/vtk.js/Common/DataModel/ImageData'),
@@ -106,6 +109,7 @@ export function VtkScene({
           pointsModule,
           arrayModule,
           ctfModule,
+          opacityModule,
           imageMapperModule,
           imageSliceModule,
           imageDataModule,
@@ -124,7 +128,11 @@ export function VtkScene({
           renderer.setBackground(0.04, 0.08, 0.15)
           const renderWindow = generic.getRenderWindow()
           const ctf = (ctfModule.default as unknown as VtkModule).newInstance() as VtkRefs['ctf']
-          applyColormap(ctf, geometry, colormap)
+          if (transferFunction) {
+            applyTransferFunction(ctf, geometry, transferFunction)
+          } else {
+            applyColormap(ctf, geometry, colormap)
+          }
           const objects: VtkObject[] = [ctf]
 
           if (geometry.mode === 'points' || geometry.mode === 'surface') {
@@ -240,10 +248,21 @@ export function VtkScene({
               mapper.setInputData(imageData)
               const volume = (volumeModule.default as unknown as VtkModule).newInstance() as {
                 setMapper: (value: unknown) => void
-                getProperty: () => { setRGBTransferFunction: (index: number, ctf: unknown) => void }
+                getProperty: () => {
+                  setRGBTransferFunction: (index: number, ctf: unknown) => void
+                  setScalarOpacity: (index: number, opacity: unknown) => void
+                }
               }
               volume.setMapper(mapper)
               volume.getProperty().setRGBTransferFunction(0, ctf)
+              if (transferFunction) {
+                const opacity = (
+                  opacityModule.default as unknown as VtkModule
+                ).newInstance() as VtkObject & { addPoint: (x: number, value: number) => void }
+                applyOpacityFunction(opacity, geometry, transferFunction)
+                volume.getProperty().setScalarOpacity(0, opacity)
+                objects.push(opacity)
+              }
               renderer.addVolume?.(volume)
               objects.push(mapper as VtkObject, volume as VtkObject)
             }
@@ -269,7 +288,7 @@ export function VtkScene({
       cancelled = true
       cleanup?.()
     }
-  }, [geometry, colormap, isovalue, clipping])
+  }, [geometry, colormap, isovalue, clipping, transferFunction])
 
   useEffect(() => {
     if (ready && refs.current) {
@@ -310,6 +329,45 @@ function applyColormap(ctf: VtkRefs['ctf'], geometry: GeometryPayload, name: str
   stops.forEach((rgb, index) => {
     ctf.addRGBPoint(min + (span * index) / last, rgb[0] / 255, rgb[1] / 255, rgb[2] / 255)
   })
+}
+
+function scalarRange(geometry: GeometryPayload): [number, number] {
+  const [minValue, maxValue] = geometry.range ?? [0, 1]
+  const min = minValue ?? 0
+  const max = maxValue ?? 1
+  return max > min ? [min, max] : [min, min + 1]
+}
+
+function applyTransferFunction(
+  ctf: VtkRefs['ctf'],
+  geometry: GeometryPayload,
+  transferFunction: SceneTransferFunction,
+) {
+  const [min, max] = scalarRange(geometry)
+  for (const point of transferFunction.colorPoints) {
+    const [red, green, blue] = hexToRgb(point.color)
+    ctf.addRGBPoint(min + (max - min) * point.x, red, green, blue)
+  }
+}
+
+function applyOpacityFunction(
+  opacity: { addPoint: (x: number, value: number) => void },
+  geometry: GeometryPayload,
+  transferFunction: SceneTransferFunction,
+) {
+  const [min, max] = scalarRange(geometry)
+  for (const point of transferFunction.opacityPoints) {
+    opacity.addPoint(min + (max - min) * point.x, point.opacity)
+  }
+}
+
+function hexToRgb(value: string): [number, number, number] {
+  if (!/^#[0-9A-Fa-f]{6}$/.test(value)) return [1, 1, 1]
+  return [
+    Number.parseInt(value.slice(1, 3), 16) / 255,
+    Number.parseInt(value.slice(3, 5), 16) / 255,
+    Number.parseInt(value.slice(5, 7), 16) / 255,
+  ]
 }
 
 function flattenValues(geometry: GeometryPayload): number[] {

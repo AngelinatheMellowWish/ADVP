@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 import threading
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -22,6 +24,79 @@ from advp.models import Dataset, RenderJob, SceneDocumentRow
 WORKER_PATH = Path(__file__).resolve().parents[2] / "scripts" / "render3d_worker.py"
 RUNNING: dict[str, subprocess.Popen[str]] = {}
 LOCK = threading.Lock()
+HEX_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
+
+
+@dataclass(frozen=True, slots=True)
+class VtkTransferFunction:
+    """Renderer-neutral transfer function ready for the VTK worker."""
+
+    color_points: tuple[tuple[float, float, float, float], ...]
+    opacity_points: tuple[tuple[float, float], ...]
+    interpolation: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "colorPoints": [
+                {"x": x, "rgb": [red, green, blue]} for x, red, green, blue in self.color_points
+            ],
+            "opacityPoints": [{"x": x, "opacity": opacity} for x, opacity in self.opacity_points],
+            "interpolation": self.interpolation,
+        }
+
+
+def build_vtk_transfer_function(scene: dict[str, Any]) -> VtkTransferFunction:
+    """Map Scene JSON 1.1 color/opacity points to normalized RGB curves."""
+    transfer = scene.get("transferFunction") or {}
+    raw_colors = transfer.get("colorPoints") or [
+        {"x": 0.0, "color": "#000000"},
+        {"x": 1.0, "color": "#ffffff"},
+    ]
+    raw_opacities = transfer.get("opacityPoints") or [
+        {"x": 0.0, "opacity": 0.0},
+        {"x": 1.0, "opacity": 1.0},
+    ]
+    colors: list[tuple[float, float, float, float]] = []
+    for point in raw_colors:
+        x = float(point.get("x", 0))
+        color = str(point.get("color", "#000000"))
+        if not HEX_COLOR.match(color):
+            raise Render3DError("invalid_transfer_function", f"invalid color: {color}")
+        colors.append(
+            (
+                x,
+                int(color[1:3], 16) / 255,
+                int(color[3:5], 16) / 255,
+                int(color[5:7], 16) / 255,
+            )
+        )
+    opacities: list[tuple[float, float]] = []
+    for point in raw_opacities:
+        opacities.append((float(point.get("x", 0)), float(point.get("opacity", 0))))
+    colors.sort(key=lambda item: item[0])
+    opacities.sort(key=lambda item: item[0])
+    if len(colors) < 2 or len(opacities) < 2:
+        raise Render3DError(
+            "invalid_transfer_function",
+            "transfer functions require at least two color and opacity points",
+        )
+    for curve in (colors, opacities):
+        if any(left[0] >= right[0] for left, right in zip(curve, curve[1:], strict=False)):
+            raise Render3DError(
+                "invalid_transfer_function",
+                "transfer points must be strictly increasing",
+            )
+    interpolation = str(transfer.get("interpolation") or "linear")
+    if interpolation not in {"linear", "smooth"}:
+        raise Render3DError(
+            "invalid_transfer_function",
+            f"unsupported interpolation: {interpolation}",
+        )
+    return VtkTransferFunction(
+        color_points=tuple(colors),
+        opacity_points=tuple(opacities),
+        interpolation=interpolation,
+    )
 
 
 class Render3DError(Exception):
@@ -99,6 +174,7 @@ def create_render_job(
 ) -> RenderJob:
     settings = get_settings()
     scene_json = scene.scene_json or {}
+    transfer_function = build_vtk_transfer_function(scene_json).to_dict()
     geometry_type = mode or str((scene_json.get("geometry") or {}).get("type") or "points")
     scene_animation = scene_json.get("animation") or {}
     animation_payload = {**scene_animation, **(animation or {})}
@@ -118,6 +194,7 @@ def create_render_job(
     job_payload = {
         "scene": scene_json,
         "geometry": geometry,
+        "transferFunction": transfer_function,
         "output_dir": str(output_dir),
         "result_path": str(output_dir / "result.json"),
         "width": width,

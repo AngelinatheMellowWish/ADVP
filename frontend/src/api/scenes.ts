@@ -6,6 +6,22 @@ export type SceneCamera = {
   viewUp: number[]
 }
 
+export type SceneColorPoint = {
+  x: number
+  color: string
+}
+
+export type SceneOpacityPoint = {
+  x: number
+  opacity: number
+}
+
+export type SceneTransferFunction = {
+  colorPoints: SceneColorPoint[]
+  opacityPoints: SceneOpacityPoint[]
+  interpolation: 'linear' | 'smooth'
+}
+
 export type SceneDocument = {
   version: string
   data: {
@@ -26,7 +42,7 @@ export type SceneDocument = {
   camera: SceneCamera
   lighting: { ambient: number; diffuse: number }
   colormap: { name: string; range: number[]; nanColor: string }
-  transferFunction: { points: number[][] }
+  transferFunction: SceneTransferFunction
   clipping: { enabled: boolean; planes: Record<string, unknown>[] }
   annotations: { text: string; position: number[]; color?: string | null }[]
   animation: {

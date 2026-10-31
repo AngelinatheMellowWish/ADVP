@@ -12,6 +12,12 @@ record. `VERSION`, this file, and the release tag must always agree. See
 
 ## [Unreleased]
 
+## [1.0.1191] - 2026-11-01
+
+### Changed
+
+- feat(eu2): extend scene schema and add transfer function editor
+
 ## [1.0.1151] - 2026-11-01
 
 ### Changed

@@ -1653,3 +1653,170 @@ a.taskbar-link:hover {
     display: flex;
   }
 }
+
+.scene-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.scene-main,
+.scene-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.scene-side {
+  gap: var(--space-3);
+}
+
+.scene-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-3);
+}
+
+.scene-controls label,
+.scene-side label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.scene-probe-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.route-notice {
+  font-size: 12px;
+  color: var(--warning);
+}
+
+.transfer-function-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.transfer-function-editor .panel-title {
+  margin-bottom: 0;
+}
+
+.transfer-function-editor .panel-title h2 {
+  margin: 0;
+}
+
+.transfer-curve svg {
+  width: 100%;
+  height: 220px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: linear-gradient(180deg, rgba(53, 208, 186, 0.04), transparent);
+  touch-action: none;
+}
+
+.transfer-color-band {
+  stroke: var(--border-subtle);
+  stroke-width: 0.4;
+}
+
+.transfer-histogram {
+  fill: rgba(159, 176, 200, 0.18);
+}
+
+.transfer-opacity-line {
+  fill: none;
+  stroke: var(--text-primary);
+  stroke-width: 1.2;
+}
+
+.transfer-point {
+  stroke: var(--bg-base);
+  stroke-width: 0.8;
+  cursor: grab;
+}
+
+.transfer-point-color {
+  stroke: var(--text-primary);
+}
+
+.transfer-point-opacity {
+  fill: var(--accent-cyan);
+}
+
+.transfer-point:focus-visible {
+  outline: 2px solid var(--warning);
+  outline-offset: 2px;
+}
+
+.transfer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.transfer-points {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+}
+
+.transfer-points h3 {
+  margin: 0 0 var(--space-2);
+  font-size: 14px;
+}
+
+.transfer-points ul,
+.scene-annotations {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.transfer-points li,
+.scene-annotations li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.transfer-points li .input {
+  width: 84px;
+}
+
+.transfer-points li input[type='color'],
+.scene-annotations li input[type='color'] {
+  width: 36px;
+  height: 32px;
+  padding: 2px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--bg-elevated);
+}
+
+.scene-annotations li .input:first-child {
+  flex: 1;
+}
+
+.scene-annotations li .input:nth-child(2) {
+  width: 120px;
+}
+
+.scene-exports {
+  margin-top: var(--space-3);
+}
+
+@media (max-width: 1024px) {
+  .scene-layout {
+    grid-template-columns: 1fr;
+  }
+}
