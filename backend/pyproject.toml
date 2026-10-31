@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "advp-backend"
-version = "1.0.0"
+version = "1.0.1131"
 description = "ADVP local backend service"
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
@@ -38,6 +38,7 @@ dependencies = [
   "keyring>=25,<26",
   "plotly>=6,<7",
   "playwright>=1.50,<2",
+  "python-multipart>=0.0.20,<1",
 ]
 
 [dependency-groups]

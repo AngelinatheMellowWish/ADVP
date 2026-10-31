@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from advp.charts.errors import RenderError as RenderError
 from advp.charts.registry import get_chart
 from advp.config import get_settings
+from advp.eu2_settings import runtime_setting
 from advp.ingest.files import read_preview
 from advp.models import ChartSelection, Dataset
 
@@ -34,7 +35,10 @@ def render_selection(session: Session, selection: ChartSelection) -> dict[str, A
     fields = {str(key): str(value) for key, value in (selected.get("fields") or {}).items()}
     style = selected.get("style") if isinstance(selected.get("style"), dict) else {}
     settings = get_settings()
-    render_limit = min(max(settings.render_sample_rows, 1), MAX_RENDER_ROWS)
+    render_limit = min(
+        max(int(runtime_setting(settings, "render_sample_rows")), 1),
+        MAX_RENDER_ROWS,
+    )
 
     if dataset.kind == "array":
         if chart_id == "image_slice":

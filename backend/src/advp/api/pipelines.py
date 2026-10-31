@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import json
+import time
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NoReturn
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
-from advp import audit
+from advp import audit, pipeline_events
 from advp import exports as export_service
 from advp import reports as report_service
 from advp import trace as trace_service
@@ -22,9 +24,11 @@ from advp.api.schemas import (
     PipelineRunSummary,
     ReportRegenerate,
 )
+from advp.db import get_session
 from advp.llm import providers as provider_service
 from advp.models import ChartSelection, Dataset, PipelineRun
 from advp.pipelines import (
+    TERMINAL_RUN_STATUSES,
     PipelineStateError,
     cancel_run,
     create_run,
@@ -186,6 +190,55 @@ def list_pipeline_runs(
 @router.get("/pipeline-runs/{run_id}", response_model=PipelineRunDetail)
 def get_pipeline_run(run_id: str, session: DbSession) -> dict[str, Any]:
     return pipeline_detail(session, _run_or_404(session, run_id))
+
+
+EVENT_POLL_SECONDS = 0.5
+EVENT_HEARTBEAT_POLLS = 30
+
+
+@router.get("/pipeline-runs/{run_id}/events")
+def stream_pipeline_events(
+    run_id: str,
+    session: DbSession,
+    since: int = Query(default=0, ge=0),
+) -> StreamingResponse:
+    """Stream persisted run events; `since` replays events after that sequence."""
+    _run_or_404(session, run_id)
+    return StreamingResponse(
+        _event_stream(run_id, since),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _event_stream(run_id: str, since: int) -> Iterator[str]:
+    cursor = since
+    idle = 0
+    while True:
+        session = get_session()
+        try:
+            rows = pipeline_events.list_events(session, run_id, since=cursor)
+            run = session.get(PipelineRun, run_id)
+            terminal = run is None or run.status in TERMINAL_RUN_STATUSES
+        finally:
+            session.close()
+        if rows:
+            for row in rows:
+                cursor = row.seq
+                payload = json.dumps(
+                    pipeline_events.event_dict(row),
+                    ensure_ascii=False,
+                    default=str,
+                )
+                yield f"id: {row.seq}\nevent: {row.type}\ndata: {payload}\n\n"
+            idle = 0
+            continue
+        if terminal:
+            return
+        idle += 1
+        if idle % EVENT_HEARTBEAT_POLLS == 0:
+            yield ": heartbeat\n\n"
+        time.sleep(EVENT_POLL_SECONDS)
 
 
 @router.get("/pipeline-runs/{run_id}/trace")

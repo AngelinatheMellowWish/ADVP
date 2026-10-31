@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from advp import __version__, render3d
+from advp import __version__, import_jobs, render3d
 from advp.api.audit import router as audit_router
 from advp.api.charts import router as charts_router
 from advp.api.cleaning import router as cleaning_router
@@ -22,24 +22,30 @@ from advp.api.datasets import router as datasets_router
 from advp.api.diagnostics import router as diagnostics_router
 from advp.api.export_jobs import router as export_jobs_router
 from advp.api.exports import router as exports_router
+from advp.api.files import router as files_router
 from advp.api.geometry3d import router as geometry3d_router
 from advp.api.health import router as health_router
 from advp.api.imaging import router as imaging_router
+from advp.api.import_jobs import router as import_jobs_router
 from advp.api.live import router as live_router
 from advp.api.pipelines import router as pipelines_router
 from advp.api.projects import router as projects_router
 from advp.api.providers import router as providers_router
+from advp.api.quality import router as quality_router
 from advp.api.render3d import router as render3d_router
 from advp.api.scenes import router as scenes_router
 from advp.api.selections import router as selections_router
 from advp.api.session import router as session_router
+from advp.api.settings import router as settings_router
 from advp.api.sql import router as sql_router
 from advp.api.streams import router as streams_router
 from advp.api.system import router as system_router
 from advp.api.trame3d import router as trame3d_router
 from advp.config import get_settings
 from advp.db import configure_database, get_session, init_db
+from advp.instance_lock import InstanceLock
 from advp.logging_config import configure_logging
+from advp.read_only import ReadOnlyMiddleware, configure_read_only, reset_read_only
 from advp.security import SecurityMiddleware
 
 
@@ -47,22 +53,37 @@ from advp.security import SecurityMiddleware
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Initialize and release process-wide resources."""
     settings = get_settings()
-    settings.ensure_database_dir()
-    configure_database(settings.database_path)
-    init_db()
-    with get_session() as session:
-        render3d.recover_jobs(session)
-    logging.getLogger("advp").info(
-        "service_started",
-        extra={"version": __version__, "host": settings.host, "port": settings.port},
-    )
-    yield
+    settings.ensure_lock_dir()
+    lock = InstanceLock(settings.resolved_instance_lock_path)
+    acquired = lock.acquire()
+    configure_read_only(not acquired)
+    try:
+        configure_logging(settings, file_logging=acquired)
+        if acquired:
+            settings.ensure_database_dir()
+        configure_database(settings.database_path, create_parent=acquired)
+        if acquired:
+            init_db()
+            with get_session() as session:
+                render3d.recover_jobs(session)
+                import_jobs.recover_import_jobs(session)
+                import_jobs.resume_pending_import_jobs(session)
+        logging.getLogger("advp").info(
+            "service_started",
+            extra={"version": __version__, "host": settings.host, "port": settings.port},
+        )
+        yield
+    finally:
+        import_jobs.shutdown_import_jobs()
+        try:
+            lock.release()
+        finally:
+            reset_read_only()
 
 
 def create_app() -> FastAPI:
     """Build the FastAPI application."""
     settings = get_settings()
-    configure_logging(settings)
     mimetypes.add_type("text/javascript", ".js")
     mimetypes.add_type("text/javascript", ".mjs")
     mimetypes.add_type("text/css", ".css")
@@ -72,24 +93,29 @@ def create_app() -> FastAPI:
         TrustedHostMiddleware,
         allowed_hosts=["127.0.0.1", "localhost", "testserver"],
     )
-    app.add_middleware(SecurityMiddleware, settings=settings)
+    app.add_middleware(ReadOnlyMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(SecurityMiddleware, settings=settings)
     app.include_router(health_router, prefix="/api")
     app.include_router(session_router, prefix="/api")
+    app.include_router(settings_router, prefix="/api")
     app.include_router(system_router, prefix="/api")
     app.include_router(audit_router, prefix="/api")
     app.include_router(diagnostics_router, prefix="/api")
     app.include_router(projects_router, prefix="/api")
     app.include_router(datasets_router, prefix="/api")
+    app.include_router(files_router, prefix="/api")
     app.include_router(charts_router, prefix="/api")
     app.include_router(geometry3d_router, prefix="/api")
     app.include_router(imaging_router, prefix="/api")
+    app.include_router(import_jobs_router, prefix="/api")
     app.include_router(cleaning_router, prefix="/api")
+    app.include_router(quality_router, prefix="/api")
     app.include_router(costs_router, prefix="/api")
     app.include_router(pipelines_router, prefix="/api")
     app.include_router(providers_router, prefix="/api")

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from advp import audit, lifecycle
 from advp.api.deps import DbSession
+from advp.read_only import is_read_only
 
 router = APIRouter(prefix="/system", tags=["system"])
 
@@ -14,6 +17,7 @@ router = APIRouter(prefix="/system", tags=["system"])
 class ActiveTasksResponse(BaseModel):
     pipelines: int
     exports: int
+    imports: int
     render_jobs: int
     live_streams: int
     total: int
@@ -83,16 +87,27 @@ def shutdown(
             },
         )
 
-    audit.record_event(
-        session,
-        "service_shutdown",
-        target_type="service",
-        detail={
-            "mode": state["mode"],
-            "force": payload.force,
-            "active_tasks": tasks.as_dict(),
-        },
-    )
+    if is_read_only():
+        logging.getLogger("advp").info(
+            "service_shutdown",
+            extra={
+                "mode": state["mode"],
+                "force": payload.force,
+                "active_tasks": tasks.as_dict(),
+                "read_only": True,
+            },
+        )
+    else:
+        audit.record_event(
+            session,
+            "service_shutdown",
+            target_type="service",
+            detail={
+                "mode": state["mode"],
+                "force": payload.force,
+                "active_tasks": tasks.as_dict(),
+            },
+        )
     if not lifecycle.schedule_shutdown():
         raise HTTPException(
             status_code=503,

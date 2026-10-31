@@ -1,0 +1,6 @@
+:root {
+  --accent: var(--accent-cyan);
+  --muted: var(--text-secondary);
+  --panel: var(--bg-panel);
+  --border: var(--border-subtle);
+}

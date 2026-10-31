@@ -10,6 +10,7 @@ import numpy as np
 from sqlalchemy.orm import Session
 
 from advp.config import get_settings
+from advp.eu2_settings import runtime_setting
 from advp.ingest.files import read_preview
 from advp.models import Dataset
 
@@ -47,7 +48,11 @@ def analyze_dataset(
     if dataset.kind == "array":
         return _array_analysis(dataset)
     settings = get_settings()
-    limit = sample_rows if sample_rows is not None else settings.analysis_sample_rows
+    limit = (
+        sample_rows
+        if sample_rows is not None
+        else int(runtime_setting(settings, "analysis_sample_rows"))
+    )
     limit = min(max(limit, 1), MAX_ANALYSIS_ROWS)
     rows = read_preview(
         dataset.source_path,

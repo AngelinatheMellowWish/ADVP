@@ -1,7 +1,7 @@
 {
   "name": "advp-frontend",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1131",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -22,9 +22,12 @@
     "cytoscape": "^3.34.4",
     "echarts": "^6.1.0",
     "i18n-iso-countries": "^7.14.0",
+    "i18next": "^26.5.11",
     "plotly.js-dist-min": "^4.1.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-i18next": "^17.1.9",
+    "react-router-dom": "^7.18.5",
     "topojson-client": "^3.1.0",
     "world-atlas": "^2.0.2"
   },

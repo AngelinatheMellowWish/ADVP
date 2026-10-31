@@ -12,6 +12,266 @@ record. `VERSION`, this file, and the release tag must always agree. See
 
 ## [Unreleased]
 
+## [1.0.1131] - 2026-11-01
+
+### Changed
+
+- feat(eu2): implement P04 pipeline and P05 chart workbench
+
+## [1.0.1091] - 2026-10-30
+
+### Changed
+
+- docs(eu2): record pause and 2.0 status
+
+## [1.0.1071] - 2026-10-30
+
+### Changed
+
+- docs(eu2): record portable external service acceptance
+
+## [1.0.1048] - 2026-10-29
+
+### Changed
+
+- feat(eu2): build manual chart selections
+
+## [1.0.1022] - 2026-10-29
+
+### Changed
+
+- feat(eu2): stream pipeline events over SSE
+
+## [1.0.997] - 2026-10-29
+
+### Changed
+
+- feat(eu2): close EU2-2 with external acceptance and browser E2E
+
+## [1.0.967] - 2026-10-29
+
+### Changed
+
+- feat(eu2): add P03 quality actions and page
+
+## [1.0.933] - 2026-10-29
+
+### Changed
+
+- feat(eu2): implement P02 import page
+
+## [1.0.904] - 2026-10-29
+
+### Changed
+
+- fix(eu2): guard web redirects peers and rendered subresources
+
+## [1.0.881] - 2026-10-29
+
+### Changed
+
+- feat(eu2): apply editable settings at runtime
+
+## [1.0.853] - 2026-10-29
+
+### Changed
+
+- fix(eu2): keep settings and audit consistent on failure
+
+## [1.0.831] - 2026-10-29
+
+### Changed
+
+- refactor(eu2): split provider contexts for fast refresh
+
+## [1.0.800] - 2026-10-29
+
+### Changed
+
+- fix(eu2): harden import job concurrency and redaction
+
+## [1.0.774] - 2026-10-29
+
+### Changed
+
+- feat(eu2): add dynamic web fallback and SSRF guard
+
+## [1.0.747] - 2026-10-29
+
+### Changed
+
+- feat(eu2): add multi-file union and join import
+
+## [1.0.723] - 2026-10-29
+
+### Changed
+
+- feat(eu2): add native file picker and copy upload
+
+## [1.0.697] - 2026-10-29
+
+### Changed
+
+- docs(eu2): rebuild requirements DOCX for the current version
+
+## [1.0.678] - 2026-10-29
+
+### Changed
+
+- docs(eu2): close EU2-2 Task 8 and pause development
+
+## [1.0.658] - 2026-10-29
+
+### Changed
+
+- fix(eu2): finalize import job terminal semantics and redaction
+
+## [1.0.633] - 2026-10-29
+
+### Changed
+
+- fix(eu2): make import jobs cancellation and recovery safe
+
+## [1.0.607] - 2026-10-29
+
+### Changed
+
+- fix(eu2): make import job claims atomic and errors safe
+
+## [1.0.585] - 2026-10-29
+
+### Changed
+
+- feat(eu2): add background import jobs
+
+## [1.0.557] - 2026-10-29
+
+### Changed
+
+- docs(eu2): record EU2-2 Task 7 implementation
+
+## [1.0.537] - 2026-10-29
+
+### Changed
+
+- fix(eu2): polish settings storage and read-only startup
+
+## [1.0.507] - 2026-10-29
+
+### Changed
+
+- fix(eu2): keep read-only shutdown and settings writes safe
+
+## [1.0.484] - 2026-10-29
+
+### Changed
+
+- fix(eu2): harden settings concurrency and read-only policy
+
+## [1.0.457] - 2026-10-29
+
+### Changed
+
+- fix(eu2): harden settings corruption and read-only startup
+
+## [1.0.433] - 2026-10-28
+
+### Changed
+
+- feat(eu2): add settings store and single-writer lock
+
+## [1.0.403] - 2026-10-28
+
+### Changed
+
+- docs(eu2): record EU2-1 completion and quarantine stale browser flows
+
+## [1.0.381] - 2026-10-28
+
+### Changed
+
+- fix(eu2): make shell browser gate hermetic
+
+## [1.0.358] - 2026-10-28
+
+### Changed
+
+- test(eu2): close EU2-1 shell
+
+## [1.0.337] - 2026-10-28
+
+### Changed
+
+- Reveal project data correctly for both file and directory sources, with accessible disabled-action reasons and stable opener errors.
+- Derive the P01 system-status header from the worst row and show missing network state as unknown.
+- Report real, deduplicated project source types while retaining a localized fallback when metadata is absent.
+
+## [1.0.309] - 2026-10-28
+
+### Changed
+
+- fix(eu2): complete P01 project metadata and folder action
+
+## [1.0.275] - 2026-10-28
+
+### Changed
+
+- feat(eu2): implement P01 home
+
+## [1.0.247] - 2026-10-28
+
+### Changed
+
+- fix(eu2): harden task and notification shell
+
+## [1.0.214] - 2026-10-28
+
+### Changed
+
+- feat(eu2): add task bar notifications and command palette
+
+## [1.0.182] - 2026-10-28
+
+### Changed
+
+- fix(eu2): harden project context and navigation
+
+## [1.0.153] - 2026-10-28
+
+### Changed
+
+- feat(eu2): add app shell routing and project context
+
+## [1.0.113] - 2026-10-28
+
+### Changed
+
+- fix(eu2): align shell styles with design requirements
+
+## [1.0.89] - 2026-10-28
+
+### Changed
+
+- feat(eu2): add design tokens and shell styles
+
+## [1.0.66] - 2026-10-28
+
+### Changed
+
+- fix(eu2): avoid render-phase i18n updates
+
+## [1.0.45] - 2026-10-28
+
+### Changed
+
+- feat(eu2): add router and i18n foundation
+
+## [1.0.22] - 2026-10-28
+
+### Changed
+
+- docs(eu2): freeze ADVP 2.0 requirements and implementation plan
+
 ## [1.0.0] - 2026-10-28
 
 ### Added

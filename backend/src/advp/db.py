@@ -10,11 +10,12 @@ _engine: Engine | None = None
 _session_factory: sessionmaker[Session] | None = None
 
 
-def configure_database(database_path: Path) -> None:
+def configure_database(database_path: Path, *, create_parent: bool = True) -> None:
     """Create or replace the process-wide SQLite engine."""
     global _engine, _session_factory
 
-    database_path.parent.mkdir(parents=True, exist_ok=True)
+    if create_parent:
+        database_path.parent.mkdir(parents=True, exist_ok=True)
     url = f"sqlite:///{database_path.as_posix()}"
     _engine = create_engine(url, connect_args={"check_same_thread": False})
     _session_factory = sessionmaker(bind=_engine, expire_on_commit=False)
@@ -55,6 +56,14 @@ def init_db() -> None:
             with engine.begin() as connection:
                 connection.execute(
                     text("ALTER TABLE chart_selections ADD COLUMN parent_selection_id VARCHAR(32)")
+                )
+        if "source" not in columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE chart_selections "
+                        "ADD COLUMN source VARCHAR(20) NOT NULL DEFAULT 'ai'"
+                    )
                 )
     if "pipeline_runs" in tables:
         columns = {column["name"] for column in inspector.get_columns("pipeline_runs")}

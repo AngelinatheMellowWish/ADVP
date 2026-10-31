@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from advp import analysis as analysis_service
 from advp import cleaning as cleaning_service
 from advp import exports as export_service
+from advp import pipeline_events
 from advp import reports as report_service
 from advp.charts import render as render_service
 from advp.charts import selection as selection_service
@@ -249,6 +250,13 @@ def execute_run(session: Session, run_id: str) -> PipelineRun:
         "run_started",
         extra={"run_id": run.id, "dataset_id": run.dataset_id, "project_id": run.project_id},
     )
+    pipeline_events.append(
+        session,
+        run.id,
+        "run_started",
+        {"dataset_id": run.dataset_id, "project_id": run.project_id},
+    )
+    session.commit()
 
     while True:
         session.refresh(run)
@@ -256,10 +264,12 @@ def execute_run(session: Session, run_id: str) -> PipelineRun:
             return run
         if run.cancel_requested:
             _mark_cancelled(session, run)
+            pipeline_events.append(session, run.id, "run_cancelled", {})
             session.commit()
             return run
         if run.pause_requested:
             run.status = "paused"
+            pipeline_events.append(session, run.id, "run_paused", {})
             session.commit()
             return run
 
@@ -269,12 +279,19 @@ def execute_run(session: Session, run_id: str) -> PipelineRun:
             run.status = "succeeded"
             run.current_step = None
             run.finished_at = datetime.now(UTC)
+            duration = _duration_ms(run.started_at, run.finished_at)
+            pipeline_events.append(
+                session,
+                run.id,
+                "run_succeeded",
+                {"duration_ms": duration},
+            )
             session.commit()
             logger.info(
                 "run_succeeded",
                 extra={
                     "run_id": run.id,
-                    "duration_ms": _duration_ms(run.started_at, run.finished_at),
+                    "duration_ms": duration,
                 },
             )
             return run
@@ -285,6 +302,12 @@ def execute_run(session: Session, run_id: str) -> PipelineRun:
             run.status = "failed"
             run.error = f"working dataset {working_dataset_id} no longer exists"
             run.finished_at = datetime.now(UTC)
+            pipeline_events.append(
+                session,
+                run.id,
+                "run_failed",
+                {"error": run.error},
+            )
             session.commit()
             return run
 
@@ -295,6 +318,12 @@ def execute_run(session: Session, run_id: str) -> PipelineRun:
         step.attempts += 1
         step.started_at = datetime.now(UTC)
         step.error = None
+        pipeline_events.append(
+            session,
+            run.id,
+            "step_started",
+            {"key": step.key, "attempt": step.attempts, "position": step.position},
+        )
         session.commit()
         logger.info(
             "step_started",
@@ -318,6 +347,13 @@ def execute_run(session: Session, run_id: str) -> PipelineRun:
             run.status = "failed"
             run.error = str(exc)
             run.finished_at = datetime.now(UTC)
+            pipeline_events.append(
+                session,
+                run.id,
+                "step_failed",
+                {"key": step.key, "attempt": step.attempts, "error": str(exc)},
+            )
+            pipeline_events.append(session, run.id, "run_failed", {"error": str(exc)})
             session.commit()
             logger.error(
                 "step_failed",
@@ -333,6 +369,13 @@ def execute_run(session: Session, run_id: str) -> PipelineRun:
         step.status = "succeeded"
         step.output_json = output
         step.finished_at = datetime.now(UTC)
+        step_duration = _duration_ms(step.started_at, step.finished_at)
+        pipeline_events.append(
+            session,
+            run.id,
+            "step_succeeded",
+            {"key": step.key, "attempt": step.attempts, "duration_ms": step_duration},
+        )
         session.commit()
         logger.info(
             "step_succeeded",
@@ -340,17 +383,19 @@ def execute_run(session: Session, run_id: str) -> PipelineRun:
                 "run_id": run.id,
                 "step": step.key,
                 "attempt": step.attempts,
-                "duration_ms": _duration_ms(step.started_at, step.finished_at),
+                "duration_ms": step_duration,
             },
         )
 
         session.refresh(run)
         if run.cancel_requested:
             _mark_cancelled(session, run)
+            pipeline_events.append(session, run.id, "run_cancelled", {})
             session.commit()
             return run
         if run.pause_requested:
             run.status = "paused"
+            pipeline_events.append(session, run.id, "run_paused", {})
             session.commit()
             return run
 

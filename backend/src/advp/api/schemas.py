@@ -5,9 +5,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 from advp.charts.registry import ChartIntent
+from advp.eu2_settings import NON_NULLABLE_FIELDS
 from advp.ingest.files import MAX_PREVIEW_ROWS, MAX_SAMPLE_ROWS
 
 
@@ -365,6 +366,7 @@ class ProjectSummary(BaseModel):
     created_at: datetime
     updated_at: datetime
     dataset_count: int
+    source_types: list[str]
 
 
 class DatasetSummary(BaseModel):
@@ -397,6 +399,28 @@ class DatasetDetail(DatasetSummary):
     schema_definition: dict[str, Any]
     profile: dict[str, Any]
     preview: list[dict[str, Any]]
+    ignored_issues: list[str] = Field(default_factory=list)
+
+
+class QualityApplyRequest(BaseModel):
+    code: str = Field(min_length=1)
+    column: str | None = Field(default=None, max_length=200)
+
+
+class QualityIgnoreRequest(BaseModel):
+    code: str = Field(min_length=1)
+
+
+class QualityApplyResponse(BaseModel):
+    code: str
+    steps: list[dict[str, Any]]
+    columns: list[str]
+    affected_rows: int
+    before_rows: int
+    after_rows: int
+    truncated: bool
+    preview: list[dict[str, Any]]
+    log: list[dict[str, Any]]
 
 
 class InspectResponse(BaseModel):
@@ -591,6 +615,15 @@ class ChartCorrectionRequest(BaseModel):
     provider_id: str | None = None
 
 
+class ChartBuilderRequest(BaseModel):
+    chart_id: str = Field(min_length=1, max_length=50)
+    fields: dict[str, str] = Field(default_factory=dict)
+    aggregation: Literal["sum", "mean", "median", "min", "max", "count"] | None = None
+    style: dict[str, Any] = Field(default_factory=dict)
+    parent_selection_id: str | None = Field(default=None, max_length=32)
+    reason: str | None = Field(default=None, max_length=500)
+
+
 class SelectedChartInfo(BaseModel):
     chart_id: str
     name: dict[str, str]
@@ -629,6 +662,7 @@ class ChartSelectionResult(BaseModel):
     provider_name: str | None
     model: str | None
     prompt_version: str
+    source: str = "ai"
     intent: str | None
     selected: SelectedChartInfo
     top3: list[SelectionTop3Entry]
@@ -789,6 +823,59 @@ class TargetExportCreate(BaseModel):
     options: dict[str, Any] = Field(default_factory=dict)
 
 
+class ImportJobCreate(BaseModel):
+    path: str = Field(min_length=1)
+    name: str | None = Field(default=None, max_length=200)
+    options: ImportOptionsModel = Field(default_factory=ImportOptionsModel)
+
+
+class ImportJobDetail(BaseModel):
+    id: str
+    project_id: str
+    status: str
+    stage: str
+    progress: float
+    message: str | None
+    payload: dict[str, Any]
+    result_dataset_id: str | None
+    error: str | None
+    cancel_requested: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class MultiFileSourceInfo(BaseModel):
+    path: str
+    name: str
+    row_count: int
+    column_count: int
+    sampled: bool
+
+
+class MultiFileRequest(BaseModel):
+    paths: list[str]
+    mode: Literal["union", "join"] = "union"
+    left_key: str | None = Field(default=None, max_length=200)
+    right_key: str | None = Field(default=None, max_length=200)
+    how: Literal["inner", "left", "right", "full"] = "inner"
+    name: str | None = Field(default=None, max_length=200)
+    options: ImportOptionsModel = Field(default_factory=ImportOptionsModel)
+
+
+class MultiFilePreviewResponse(BaseModel):
+    mode: str
+    files: list[MultiFileSourceInfo]
+    columns: list[str]
+    left_rows: int | None = None
+    right_rows: int | None = None
+    result_rows: int
+    match_rate: float | None = None
+    duplicate_keys: dict[str, int] | None = None
+    conflicts: list[str]
+    sampled: bool
+    preview: list[dict[str, Any]]
+
+
 class PipelineStepInfo(BaseModel):
     id: str
     key: str
@@ -841,3 +928,37 @@ class ProviderUsageRecord(BaseModel):
     currency: str
     attempts: int
     created_at: datetime
+
+
+class SettingValue(BaseModel):
+    value: Any
+    source: Literal["env", "settings", "default"]
+
+
+class Eu2SettingsPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    language: Literal["zh", "en"] | None = None
+    workspace: str | None = None
+    analysis_sample_rows: int | None = Field(default=None, ge=1, le=100_000)
+    render_sample_rows: int | None = Field(default=None, ge=1, le=100_000)
+    default_provider_id: str | None = None
+    global_budget: float | None = Field(default=None, ge=0)
+    monthly_budget: float | None = Field(default=None, ge=0)
+    search_raw_content: bool | None = None
+    search_sensitive: bool | None = None
+    search_excluded_projects: list[str] | None = None
+    sandbox_timeout_seconds: int | None = Field(default=None, ge=1, le=600)
+    log_redaction: bool | None = None
+    update_channel: Literal["stable", "beta"] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_null_non_nullable(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            invalid = sorted(
+                name for name in NON_NULLABLE_FIELDS if name in data and data[name] is None
+            )
+            if invalid:
+                raise ValueError(f"fields may not be null: {', '.join(invalid)}")
+        return data

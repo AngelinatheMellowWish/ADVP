@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from advp import analysis as analysis_service
 from advp.api.deps import DbSession
 from advp.api.schemas import (
+    ChartBuilderRequest,
     ChartCandidatesResponse,
     ChartSelectionRequest,
     ChartSelectionResult,
@@ -21,6 +22,7 @@ from advp.api.schemas import (
     PreviewResponse,
     RelocateRequest,
 )
+from advp.charts import builder as builder_service
 from advp.charts import selection as selection_service
 from advp.charts.selector import (
     ChartSelectionError,
@@ -212,6 +214,36 @@ def list_chart_selections(
     _dataset_or_404(session, dataset_id)
     rows = selection_service.list_dataset_selections(session, dataset_id, limit=limit)
     return [selection_service.selection_summary(row) for row in rows]
+
+
+@router.post(
+    "/{dataset_id}/chart-builder",
+    response_model=ChartSelectionResult,
+    status_code=201,
+)
+def build_chart(
+    dataset_id: str,
+    payload: ChartBuilderRequest,
+    session: DbSession,
+) -> dict[str, Any]:
+    dataset = _dataset_or_404(session, dataset_id)
+    try:
+        row = builder_service.build_manual_selection(
+            session,
+            dataset,
+            chart_id=payload.chart_id,
+            fields=payload.fields,
+            aggregation=payload.aggregation,
+            style=payload.style,
+            parent_selection_id=payload.parent_selection_id,
+            reason=payload.reason,
+        )
+    except builder_service.ChartBuilderError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    return selection_service.selection_result(row)
 
 
 @router.post("/{dataset_id}/analysis", response_model=DatasetAnalysisResponse)

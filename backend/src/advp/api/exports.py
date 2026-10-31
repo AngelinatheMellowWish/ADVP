@@ -116,7 +116,7 @@ def run_selection_code(selection_id: str, session: DbSession) -> dict[str, Any]:
         code = export_service.build_python(session, row)
     except export_service.ExportError as exc:
         _raise_export(exc)
-    return sandbox.run_python(code, timeout=30.0).to_dict()
+    return sandbox.run_python(code).to_dict()
 
 
 @router.get("/{selection_id}/export/python")

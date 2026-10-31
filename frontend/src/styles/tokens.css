@@ -1,0 +1,24 @@
+:root {
+  --bg-base: #0b1220;
+  --bg-panel: #111a2c;
+  --bg-elevated: #16223a;
+  --border-subtle: #22304a;
+  --text-primary: #e6edf7;
+  --text-secondary: #9fb0c8;
+  --accent-cyan: #35d0ba;
+  --accent-violet: #8b7cff;
+  --warning: #f2b84b;
+  --danger: #ff6b6b;
+  --info: #5aa9ff;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --radius-control: 6px;
+  --radius-card: 10px;
+  --radius-modal: 14px;
+  --sidebar-width: 248px;
+}

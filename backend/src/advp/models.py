@@ -15,6 +15,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -49,6 +50,11 @@ class Project(Base):
         back_populates="project",
         cascade="all, delete-orphan",
         order_by="Dataset.created_at",
+    )
+    import_jobs: Mapped[list[ImportJob]] = relationship(
+        back_populates="project",
+        cascade="all, delete-orphan",
+        order_by="ImportJob.created_at",
     )
 
 
@@ -169,6 +175,24 @@ class PipelineStep(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class PipelineEvent(Base):
+    """One ordered event emitted while a pipeline run executes."""
+
+    __tablename__ = "pipeline_events"
+    __table_args__ = (UniqueConstraint("run_id", "seq", name="uq_pipeline_events_run_seq"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("pipeline_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    type: Mapped[str] = mapped_column(String(40), nullable=False)
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+
+
 class CleaningRun(Base):
     """A persisted cleaning recipe applied to a source dataset."""
 
@@ -202,6 +226,7 @@ class ChartSelection(Base):
     provider_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     model: Mapped[str | None] = mapped_column(String(200), nullable=True)
     prompt_version: Mapped[str] = mapped_column(String(50), nullable=False)
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="ai")
     intent: Mapped[str | None] = mapped_column(String(20), nullable=True)
     selected_chart_id: Mapped[str] = mapped_column(String(50), nullable=False)
     selected_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
@@ -308,6 +333,33 @@ class ExportJob(Base):
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ImportJob(Base):
+    """A persisted background dataset import task."""
+
+    __tablename__ = "import_jobs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", index=True)
+    stage: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")
+    progress: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    result_dataset_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    project: Mapped[Project] = relationship(back_populates="import_jobs")
 
 
 class LlmUsage(Base):
