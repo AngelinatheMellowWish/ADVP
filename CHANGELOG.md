@@ -12,6 +12,12 @@ record. `VERSION`, this file, and the release tag must always agree. See
 
 ## [Unreleased]
 
+## [1.0.1151] - 2026-11-01
+
+### Changed
+
+- fix(release): avoid false positive in public path scan
+
 ## [1.0.1131] - 2026-11-01
 
 ### Changed
