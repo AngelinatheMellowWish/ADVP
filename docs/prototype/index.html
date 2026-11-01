@@ -1,0 +1,2185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ADVP · 高保真交互原型 v0.1.0</title>
+<style>
+  :root{
+    --bg:#070d18; --bg-2:#0a1322; --panel:#0e1728; --panel-2:#121e33; --panel-3:#16243c;
+    --line:#1e2d47; --line-2:#2a3d5c; --text:#e6edf7; --text-2:#a9b9cf; --muted:#7386a3;
+    --cyan:#35d0ba; --cyan-dim:rgba(53,208,186,.12); --violet:#8b7cff; --violet-dim:rgba(139,124,255,.13);
+    --blue:#5aa9ff; --blue-dim:rgba(90,169,255,.12); --amber:#f2b84b; --amber-dim:rgba(242,184,75,.12);
+    --red:#ff6b6b; --red-dim:rgba(255,107,107,.12); --green:#7adb8a; --green-dim:rgba(122,219,138,.12);
+    --radius:10px; --radius-sm:7px; --shadow:0 18px 50px rgba(0,0,0,.38);
+    --mono:"Cascadia Code","JetBrains Mono",Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:radial-gradient(1200px 700px at 78% -10%,rgba(53,208,186,.08),transparent 60%),
+    radial-gradient(900px 600px at 12% 110%,rgba(139,124,255,.10),transparent 60%),var(--bg);
+    color:var(--text); font-family:Inter,"Segoe UI","Microsoft YaHei UI","PingFang SC",system-ui,sans-serif;
+    font-size:13px; line-height:1.55; -webkit-font-smoothing:antialiased;
+  }
+  button,input,select,textarea{font:inherit;color:inherit}
+  button{cursor:pointer}
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-thumb{background:#243451;border-radius:8px;border:2px solid var(--bg)}
+  ::-webkit-scrollbar-track{background:transparent}
+  a{color:var(--cyan);text-decoration:none}
+
+  .shell{display:grid;grid-template-columns:248px minmax(0,1fr);min-height:100vh}
+  .sidebar{
+    position:sticky;top:0;height:100vh;display:flex;flex-direction:column;
+    background:linear-gradient(180deg,rgba(14,23,40,.96),rgba(9,17,30,.98));
+    border-right:1px solid var(--line);padding:18px 14px 14px;z-index:20;
+  }
+  .brand{display:flex;align-items:center;gap:10px;padding:4px 8px 16px}
+  .brand-mark{
+    width:38px;height:38px;border-radius:11px;display:grid;place-items:center;
+    background:conic-gradient(from 210deg,var(--cyan),var(--blue),var(--violet),var(--cyan));
+    box-shadow:0 0 22px rgba(53,208,186,.28);position:relative;
+  }
+  .brand-mark::after{content:"";position:absolute;inset:2px;border-radius:9px;background:#0a1424}
+  .brand-mark svg{position:relative;z-index:1}
+  .brand-name{font-size:15px;font-weight:700;letter-spacing:.12em}
+  .brand-sub{font-size:10px;color:var(--muted);letter-spacing:.06em;margin-top:1px}
+  .nav-group{margin-top:14px}
+  .nav-label{font-size:10px;letter-spacing:.16em;color:var(--muted);padding:0 10px 6px;text-transform:uppercase}
+  .nav-item{
+    width:100%;display:flex;align-items:center;gap:10px;padding:9px 10px;margin:2px 0;border:1px solid transparent;
+    border-radius:8px;background:transparent;color:var(--text-2);text-align:left;font-size:12.5px;
+    transition:.16s background,.16s color,.16s border-color;
+  }
+  .nav-item svg{width:16px;height:16px;flex:0 0 auto;opacity:.85}
+  .nav-item:hover{background:rgba(255,255,255,.035);color:var(--text)}
+  .nav-item.active{background:linear-gradient(90deg,rgba(53,208,186,.14),rgba(53,208,186,.03));border-color:rgba(53,208,186,.22);color:#dffaf5}
+  .nav-item.active svg{color:var(--cyan);opacity:1}
+  .nav-badge{margin-left:auto;font-size:10px;padding:1px 6px;border-radius:20px;background:var(--violet-dim);color:#c9c0ff;border:1px solid rgba(139,124,255,.25)}
+  .side-foot{margin-top:auto;padding-top:14px}
+  .side-card{border:1px solid var(--line);background:rgba(18,30,51,.7);border-radius:10px;padding:10px 11px}
+  .side-card .row{display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--text-2)}
+  .side-card .mono{font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 8px rgba(122,219,138,.8)}
+  .side-version{margin-top:10px;font-size:10px;color:var(--muted);display:flex;justify-content:space-between;padding:0 2px}
+
+  .main{min-width:0;display:flex;flex-direction:column}
+  .topbar{
+    position:sticky;top:0;z-index:15;display:flex;align-items:center;gap:16px;padding:12px 26px;
+    background:rgba(7,13,24,.82);backdrop-filter:blur(14px);border-bottom:1px solid var(--line);
+  }
+  .crumbs{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);white-space:nowrap}
+  .crumbs b{color:var(--text-2);font-weight:500}
+  .top-title{margin-left:2px}
+  .top-title h1{font-size:14px;font-weight:650;margin:0;letter-spacing:.01em}
+  .top-title p{margin:0;font-size:10.5px;color:var(--muted)}
+  .top-actions{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .search{
+    display:flex;align-items:center;gap:8px;width:250px;padding:7px 10px;border:1px solid var(--line);
+    border-radius:8px;background:rgba(18,30,51,.65);color:var(--muted);font-size:11.5px;
+  }
+  .search kbd{margin-left:auto;font-family:var(--mono);font-size:9.5px;border:1px solid var(--line-2);padding:1px 5px;border-radius:4px;color:var(--text-2)}
+  .icon-btn{
+    width:32px;height:32px;display:grid;place-items:center;border-radius:8px;border:1px solid var(--line);
+    background:rgba(18,30,51,.65);color:var(--text-2);
+  }
+  .icon-btn:hover{border-color:var(--line-2);color:var(--text)}
+  .lang-btn{width:auto;padding:0 10px;font-size:11px;font-family:var(--mono);letter-spacing:.04em}
+  .proto-badge{font-size:9.5px;padding:3px 8px;border-radius:20px;border:1px solid rgba(139,124,255,.3);background:var(--violet-dim);color:#c9c0ff;white-space:nowrap}
+
+  .content{padding:22px 26px 44px;max-width:1660px;width:100%;margin:0 auto}
+  .page{display:none;animation:pageIn .22s ease}
+  .page.active{display:block}
+  @keyframes pageIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  .page-head{display:flex;align-items:flex-end;gap:16px;margin-bottom:18px}
+  .eyebrow{font-size:10px;letter-spacing:.18em;color:var(--cyan);text-transform:uppercase;margin-bottom:5px}
+  .page-head h2{margin:0;font-size:22px;letter-spacing:-.015em;font-weight:650}
+  .page-head p{margin:5px 0 0;color:var(--muted);font-size:12px;max-width:720px}
+  .head-actions{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 13px;border-radius:8px;
+    border:1px solid var(--line-2);background:var(--panel-2);color:var(--text);font-size:12px;font-weight:550;
+    transition:.16s;white-space:nowrap;
+  }
+  .btn svg{width:14px;height:14px}
+  .btn:hover{border-color:#3a527a;background:var(--panel-3)}
+  .btn.primary{background:linear-gradient(135deg,#2ec7b2,#35d0ba 45%,#4bb6d8);border-color:transparent;color:#04201c;font-weight:700;box-shadow:0 6px 18px rgba(53,208,186,.18)}
+  .btn.primary:hover{filter:brightness(1.06)}
+  .btn.ghost{background:transparent;border-color:var(--line)}
+  .btn.danger{color:#ffb3b3;border-color:rgba(255,107,107,.3);background:var(--red-dim)}
+  .btn.small{padding:5px 9px;font-size:11px;border-radius:6px}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+
+  .card{background:linear-gradient(180deg,rgba(18,30,51,.86),rgba(14,23,40,.9));border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 1px 0 rgba(255,255,255,.02) inset}
+  .card-pad{padding:16px}
+  .card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 16px;border-bottom:1px solid var(--line)}
+  .card-head h3{margin:0;font-size:12.5px;font-weight:600;letter-spacing:.01em}
+  .card-head .sub{font-size:10.5px;color:var(--muted)}
+  .card-body{padding:16px}
+
+  .grid{display:grid;gap:14px}
+  .g-4{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .g-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .g-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .split-2-1{grid-template-columns:minmax(0,2fr) minmax(0,1fr)}
+  .split-1-2{grid-template-columns:minmax(0,1fr) minmax(0,2fr)}
+  .split-3{grid-template-columns:250px minmax(0,1fr) 300px}
+  .split-3b{grid-template-columns:270px minmax(0,1fr) 290px}
+
+  .stat{padding:14px 15px;position:relative;overflow:hidden}
+  .stat .k{font-size:10.5px;color:var(--muted);letter-spacing:.04em}
+  .stat .v{font-size:24px;font-weight:680;letter-spacing:-.02em;margin-top:4px;font-variant-numeric:tabular-nums}
+  .stat .d{font-size:10.5px;color:var(--text-2);margin-top:3px}
+  .stat .spark{position:absolute;right:10px;bottom:10px;opacity:.8}
+  .up{color:var(--green)} .down{color:var(--red)} .warn{color:var(--amber)}
+
+  .pill{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:20px;font-size:10px;border:1px solid var(--line-2);color:var(--text-2);background:rgba(255,255,255,.025);white-space:nowrap}
+  .pill.cyan{color:#a9f4e8;border-color:rgba(53,208,186,.28);background:var(--cyan-dim)}
+  .pill.violet{color:#d2ccff;border-color:rgba(139,124,255,.28);background:var(--violet-dim)}
+  .pill.amber{color:#ffe0a1;border-color:rgba(242,184,75,.3);background:var(--amber-dim)}
+  .pill.red{color:#ffb3b3;border-color:rgba(255,107,107,.3);background:var(--red-dim)}
+  .pill.green{color:#bdf4c7;border-color:rgba(122,219,138,.3);background:var(--green-dim)}
+  .pill.blue{color:#b9dcff;border-color:rgba(90,169,255,.3);background:var(--blue-dim)}
+  .dot-s{width:5px;height:5px;border-radius:50%;background:currentColor}
+
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+  .hero{
+    display:flex;align-items:center;gap:22px;padding:22px;margin-bottom:14px;border:1px solid var(--line);
+    border-radius:12px;background:
+      radial-gradient(600px 180px at 85% 10%,rgba(139,124,255,.16),transparent 70%),
+      radial-gradient(500px 220px at 10% 120%,rgba(53,208,186,.13),transparent 70%),
+      linear-gradient(120deg,rgba(18,30,51,.92),rgba(10,19,34,.92));
+    position:relative;overflow:hidden;
+  }
+  .hero::after{content:"";position:absolute;right:2%;top:-70px;width:300px;height:300px;border-radius:50%;background:radial-gradient(circle,rgba(139,124,255,.07),transparent 62%);pointer-events:none}
+  .hero h2{margin:0;font-size:21px;letter-spacing:-.01em}
+  .hero p{margin:6px 0 0;color:var(--text-2);font-size:12px;max-width:560px}
+  .hero .head-actions{position:relative;z-index:1}
+  .hero .suggest{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+  .hero .suggest .pill{font-size:10.5px}
+
+  .project-card{border:1px solid var(--line);border-radius:10px;background:linear-gradient(180deg,rgba(18,30,51,.75),rgba(13,22,38,.9));overflow:hidden;transition:.18s;cursor:pointer}
+  .project-card:hover{transform:translateY(-2px);border-color:#33507a;box-shadow:0 12px 26px rgba(0,0,0,.25)}
+  .thumb{height:92px;position:relative;background:linear-gradient(135deg,#0d1a2e,#122441);border-bottom:1px solid var(--line);overflow:hidden}
+  .thumb svg{position:absolute;inset:0;width:100%;height:100%}
+  .thumb .tag{position:absolute;left:9px;top:9px;z-index:1}
+  .project-meta{padding:11px 12px}
+  .project-meta h4{margin:0;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .project-meta .sub{display:flex;align-items:center;justify-content:space-between;margin-top:5px;font-size:10.5px;color:var(--muted)}
+  .project-meta .bar{height:3px;border-radius:3px;background:#1b2a44;margin-top:9px;overflow:hidden}
+  .project-meta .bar i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,var(--cyan),var(--blue))}
+
+  .list{display:flex;flex-direction:column}
+  .list-item{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid rgba(30,45,71,.7)}
+  .list-item:last-child{border-bottom:0;padding-bottom:0}
+  .list-item:first-child{padding-top:0}
+  .li-icon{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;flex:0 0 auto;background:var(--panel-3);border:1px solid var(--line);color:var(--text-2)}
+  .li-icon svg{width:14px;height:14px}
+  .li-main{min-width:0;flex:1}
+  .li-main .t{font-size:11.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .li-main .s{font-size:10px;color:var(--muted);margin-top:2px}
+  .li-time{font-size:9.5px;color:var(--muted);white-space:nowrap;font-family:var(--mono)}
+
+  .status-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid rgba(30,45,71,.6);font-size:11px}
+  .status-row:last-child{border-bottom:0}
+  .status-row .lbl{color:var(--muted)}
+  .status-row .val{display:flex;align-items:center;gap:6px;color:var(--text-2)}
+  .meter{width:78px;height:4px;border-radius:4px;background:#1b2a44;overflow:hidden}
+  .meter i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--blue))}
+  .meter.warn i{background:linear-gradient(90deg,var(--amber),#ff9f6b)}
+
+  .steps{display:flex;align-items:center;gap:0;padding:14px 16px;border-bottom:1px solid var(--line);overflow:auto}
+  .step{display:flex;align-items:center;gap:8px;flex:1;min-width:112px;position:relative}
+  .step:not(:last-child)::after{content:"";position:absolute;left:calc(50% + 24px);right:8px;top:15px;height:1px;background:var(--line-2)}
+  .step .num{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:10px;font-family:var(--mono);border:1px solid var(--line-2);background:var(--panel);color:var(--muted);flex:0 0 auto;position:relative;z-index:1}
+  .step.done .num{background:var(--cyan-dim);border-color:rgba(53,208,186,.4);color:var(--cyan)}
+  .step.active .num{background:linear-gradient(135deg,var(--violet),var(--blue));border-color:transparent;color:#fff;box-shadow:0 0 16px rgba(139,124,255,.4)}
+  .step .txt{font-size:10.5px;color:var(--muted);white-space:nowrap}
+  .step.done .txt,.step.active .txt{color:var(--text-2)}
+  .step.active .txt{color:#ded9ff}
+
+  .tabs{display:flex;gap:4px;padding:4px;background:rgba(10,19,34,.7);border:1px solid var(--line);border-radius:9px;width:max-content;max-width:100%;overflow:auto}
+  .tab{padding:6px 11px;border:0;background:transparent;border-radius:6px;font-size:11.5px;color:var(--muted);white-space:nowrap}
+  .tab:hover{color:var(--text-2)}
+  .tab.active{background:var(--panel-3);color:var(--text);box-shadow:0 1px 0 rgba(255,255,255,.04) inset}
+  .tab-panel{display:none}
+  .tab-panel.active{display:block}
+
+  .dropzone{
+    border:1.5px dashed #2b4368;border-radius:11px;background:radial-gradient(400px 160px at 50% 0%,rgba(53,208,186,.07),transparent 70%);
+    padding:30px 20px;text-align:center;transition:.18s;position:relative;overflow:hidden;
+  }
+  .dropzone:hover{border-color:rgba(53,208,186,.55);background:rgba(53,208,186,.04)}
+  .dropzone .dz-icon{width:46px;height:46px;border-radius:12px;display:grid;place-items:center;margin:0 auto 11px;background:var(--cyan-dim);border:1px solid rgba(53,208,186,.25);color:var(--cyan)}
+  .dropzone h4{margin:0;font-size:13px}
+  .dropzone p{margin:5px 0 12px;font-size:10.5px;color:var(--muted)}
+  .file-row{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:rgba(18,30,51,.55);margin-top:8px;font-size:11px}
+  .file-row .fi{width:24px;height:24px;border-radius:6px;display:grid;place-items:center;background:var(--panel-3);border:1px solid var(--line);color:var(--text-2);flex:0 0 auto}
+  .file-row .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .file-row .sz{font-size:10px;color:var(--muted);font-family:var(--mono)}
+  .file-row .ok{color:var(--green);font-size:10px}
+  .file-row .spin{width:12px;height:12px;border:2px solid rgba(255,255,255,.16);border-top-color:var(--cyan);border-radius:50%;animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .field{display:flex;flex-direction:column;gap:4px;min-width:0}
+  .field.full{grid-column:1/-1}
+  .field label{font-size:10.5px;color:var(--muted);letter-spacing:.02em}
+  .input,.select,textarea.input{
+    width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:7px;background:rgba(8,15,27,.7);
+    color:var(--text);font-size:11.5px;outline:none;transition:.15s;
+  }
+  .input:focus,.select:focus,textarea.input:focus{border-color:rgba(53,208,186,.55);box-shadow:0 0 0 3px rgba(53,208,186,.08)}
+  .input::placeholder{color:#5c6d87}
+  .select{appearance:none;background-image:linear-gradient(45deg,transparent 50%,#7386a3 50%),linear-gradient(135deg,#7386a3 50%,transparent 50%);background-position:calc(100% - 14px) 50%,calc(100% - 9px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:26px}
+  .hint{font-size:9.5px;color:var(--muted);margin-top:1px}
+  .check{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-2)}
+  .check input{accent-color:var(--cyan);width:13px;height:13px}
+  .switch{width:34px;height:19px;border-radius:20px;border:1px solid var(--line-2);background:#1b2a44;position:relative;transition:.18s;flex:0 0 auto}
+  .switch::after{content:"";position:absolute;width:13px;height:13px;border-radius:50%;background:#93a6c0;top:2px;left:2px;transition:.18s}
+  .switch.on{background:rgba(53,208,186,.28);border-color:rgba(53,208,186,.45)}
+  .switch.on::after{left:17px;background:var(--cyan);box-shadow:0 0 8px rgba(53,208,186,.7)}
+
+  table{width:100%;border-collapse:collapse;font-size:11px}
+  th{font-size:9.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);background:rgba(10,19,34,.5);position:sticky;top:0}
+  td{padding:7px 10px;border-bottom:1px solid rgba(30,45,71,.55);color:var(--text-2);white-space:nowrap}
+  tr:hover td{background:rgba(53,208,186,.035)}
+  .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:9px;max-height:340px}
+  .type{font-family:var(--mono);font-size:9px;padding:1px 5px;border-radius:4px;border:1px solid var(--line-2);color:var(--text-2);background:rgba(255,255,255,.02)}
+  .num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .null{color:var(--red);font-style:italic;font-size:10px}
+  .cell-warn{color:var(--amber)}
+
+  .score-ring{position:relative;width:92px;height:92px;flex:0 0 auto}
+  .score-ring svg{transform:rotate(-90deg)}
+  .score-ring .val{position:absolute;inset:0;display:grid;place-items:center;text-align:center;line-height:1.1}
+  .score-ring .val b{font-size:22px;display:block;letter-spacing:-.03em}
+  .score-ring .val span{font-size:9px;color:var(--muted)}
+
+  .issue{display:flex;gap:9px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:rgba(18,30,51,.5);margin-bottom:7px}
+  .issue:last-child{margin-bottom:0}
+  .issue .sev{width:6px;border-radius:4px;flex:0 0 auto}
+  .issue .sev.high{background:var(--red);box-shadow:0 0 10px rgba(255,107,107,.35)}
+  .issue .sev.mid{background:var(--amber)}
+  .issue .sev.low{background:var(--blue)}
+  .issue .body{min-width:0;flex:1}
+  .issue .body .t{font-size:11px;color:var(--text)}
+  .issue .body .s{font-size:9.5px;color:var(--muted);margin-top:2px}
+  .issue .go{font-size:10px;color:var(--cyan);white-space:nowrap;align-self:center}
+
+  .bar-row{display:flex;align-items:center;gap:9px;margin-bottom:8px;font-size:10.5px}
+  .bar-row .lbl{width:58px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bar-row .track{flex:1;height:6px;border-radius:6px;background:#172640;overflow:hidden}
+  .bar-row .track i{display:block;height:100%;border-radius:6px;background:linear-gradient(90deg,var(--cyan),var(--blue))}
+  .bar-row .pct{width:34px;text-align:right;color:var(--text-2);font-family:var(--mono);font-size:9.5px}
+
+  .chart-card{position:relative;align-self:start}
+  .chart-toolbar{display:flex;align-items:center;gap:6px;padding:9px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .chart-toolbar .sp{margin-left:auto}
+  .chart-area{padding:8px 10px 4px;position:relative}
+  .chart-legend{display:flex;gap:14px;align-items:center;padding:0 12px 8px;font-size:10px;color:var(--muted);flex-wrap:wrap}
+  .chart-legend .k{display:inline-flex;align-items:center;gap:5px}
+  .chart-legend .sw{width:14px;height:3px;border-radius:2px}
+
+  .log{font-family:var(--mono);font-size:10.5px;line-height:1.75;height:330px;overflow:auto;padding:10px 12px;background:rgba(6,12,22,.55);border-radius:8px;border:1px solid var(--line)}
+  .log .ln{display:flex;gap:9px;white-space:pre-wrap;word-break:break-word}
+  .log .ts{color:#566a88;flex:0 0 auto}
+  .log .lv{flex:0 0 auto;width:38px}
+  .log .lv.i{color:var(--blue)} .log .lv.ok{color:var(--green)} .log .lv.w{color:var(--amber)} .log .lv.e{color:var(--red)}
+  .log .msg{color:#b8c7dc}
+  .log .hl{color:#e8f7f4}
+
+  .chat{display:flex;gap:8px;margin-top:10px}
+  .chat .input{flex:1}
+  .chat .btn{flex:0 0 auto}
+
+  .kv{display:grid;grid-template-columns:96px 1fr;gap:6px 10px;font-size:10.5px}
+  .kv .k{color:var(--muted)}
+  .kv .v{color:var(--text-2);min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .kv .v.mono{font-size:10px}
+
+  .viewport{
+    position:relative;min-height:430px;border-radius:10px;overflow:hidden;border:1px solid var(--line);
+    background:
+      radial-gradient(520px 300px at 62% 38%,rgba(53,208,186,.18),transparent 62%),
+      radial-gradient(420px 300px at 40% 62%,rgba(139,124,255,.22),transparent 64%),
+      radial-gradient(300px 220px at 72% 68%,rgba(90,169,255,.16),transparent 65%),
+      linear-gradient(180deg,#07101e,#0a1628 60%,#08111f);
+  }
+  .viewport::before{
+    content:"";position:absolute;inset:-20%;background:
+      conic-gradient(from 140deg at 54% 50%,transparent 0 18%,rgba(53,208,186,.16) 18.5% 19.5%,transparent 20% 38%,rgba(139,124,255,.15) 38.5% 39.5%,transparent 40% 58%,rgba(90,169,255,.13) 58.5% 59.5%,transparent 60%);
+    filter:blur(18px);opacity:.75;animation:slowspin 38s linear infinite;
+  }
+  @keyframes slowspin{to{transform:rotate(360deg)}}
+  .viewport .grid-floor{
+    position:absolute;left:-10%;right:-10%;bottom:-6%;height:52%;
+    background-image:linear-gradient(rgba(90,169,255,.13) 1px,transparent 1px),linear-gradient(90deg,rgba(90,169,255,.13) 1px,transparent 1px);
+    background-size:38px 38px;transform:perspective(420px) rotateX(62deg);transform-origin:bottom;opacity:.55;
+  }
+  .volume{
+    position:absolute;left:50%;top:48%;width:240px;height:240px;transform:translate(-50%,-50%);
+    border-radius:50%;filter:blur(2px);
+    background:
+      radial-gradient(circle at 42% 42%,rgba(207,255,246,.85),rgba(53,208,186,.55) 16%,rgba(53,208,186,.14) 38%,transparent 58%),
+      radial-gradient(circle at 64% 58%,rgba(200,190,255,.75),rgba(139,124,255,.32) 20%,transparent 52%),
+      radial-gradient(circle at 38% 66%,rgba(160,215,255,.6),rgba(90,169,255,.18) 24%,transparent 56%);
+    box-shadow:0 0 90px rgba(53,208,186,.25),0 0 160px rgba(139,124,255,.18);
+    animation:breathe 7s ease-in-out infinite;
+  }
+  @keyframes breathe{0%,100%{transform:translate(-50%,-50%) scale(1)}50%{transform:translate(-50%,-50%) scale(1.035)}}
+  .volume .ring{position:absolute;inset:18%;border-radius:50%;border:1px solid rgba(207,255,246,.18)}
+  .volume .ring:nth-child(2){inset:32%;border-color:rgba(200,190,255,.18)}
+  .volume .ring:nth-child(3){inset:44%;border-color:rgba(160,215,255,.2)}
+  .viewport .vol-box{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1;opacity:.62}
+  .viewport .axis-note{position:absolute;left:12px;bottom:58px;z-index:2;font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.03em}
+  .viewport .axis-note b{color:var(--text-2);font-weight:500}
+  .viewport .hud{position:absolute;left:12px;top:12px;display:flex;gap:6px;flex-wrap:wrap;z-index:2}
+  .viewport .hud-r{position:absolute;right:12px;top:12px;display:flex;gap:6px;z-index:2}
+  .viewport .cam{position:absolute;right:14px;bottom:58px;width:58px;height:58px;border-radius:10px;border:1px solid var(--line);background:rgba(7,13,24,.55);z-index:2;display:grid;place-items:center}
+  .viewport .colorbar{position:absolute;right:14px;top:56px;bottom:130px;width:12px;border-radius:6px;background:linear-gradient(180deg,#8b7cff,#5aa9ff,#35d0ba,#f2b84b,#ff6b6b);border:1px solid rgba(255,255,255,.18);z-index:2}
+  .viewport .colorbar span{position:absolute;right:18px;font-size:8.5px;color:var(--text-2);font-family:var(--mono);white-space:nowrap}
+  .viewport .timeline{position:absolute;left:12px;right:84px;bottom:12px;display:flex;align-items:center;gap:8px;padding:6px 9px;border:1px solid var(--line);border-radius:8px;background:rgba(7,13,24,.62);z-index:2;font-size:9.5px;color:var(--muted)}
+  .timeline .track{flex:1;height:4px;border-radius:4px;background:#1b2a44;position:relative}
+  .timeline .track i{position:absolute;left:0;top:0;bottom:0;width:38%;border-radius:4px;background:linear-gradient(90deg,var(--cyan),var(--violet))}
+  .timeline .track b{position:absolute;left:38%;top:-3px;width:10px;height:10px;border-radius:50%;background:#dffaf5;box-shadow:0 0 10px rgba(53,208,186,.7);transform:translateX(-50%)}
+
+  .tf-editor{height:120px;border:1px solid var(--line);border-radius:8px;background:linear-gradient(180deg,rgba(8,15,27,.8),rgba(10,19,34,.8));position:relative;overflow:hidden}
+  .tf-editor .grad{position:absolute;left:0;right:0;bottom:0;height:12px;background:linear-gradient(90deg,#1b2a44,#8b7cff,#5aa9ff,#35d0ba,#f2b84b,#ff6b6b)}
+  .tf-editor svg{position:absolute;inset:0;width:100%;height:100%}
+
+  .report-page{
+    background:#f4f1ea;color:#22252b;border-radius:4px;padding:26px 30px;min-height:700px;
+    box-shadow:0 20px 60px rgba(0,0,0,.45);font-family:"Microsoft YaHei UI","Segoe UI",serif;
+  }
+  .report-page h3{margin:0 0 3px;font-size:18px;color:#111}
+  .report-page .rp-sub{font-size:9px;color:#6b6f78;letter-spacing:.08em;text-transform:uppercase;margin-bottom:14px}
+  .report-page h4{font-size:11px;margin:15px 0 5px;color:#1b2738;border-left:3px solid #2b8a7a;padding-left:6px}
+  .report-page p{font-size:9.5px;line-height:1.65;color:#3b414b;margin:4px 0}
+  .report-page .rp-meta{display:flex;gap:14px;font-size:8.5px;color:#6b6f78;border-top:1px solid #d8d2c4;border-bottom:1px solid #d8d2c4;padding:5px 0;margin-bottom:10px}
+  .report-page .rp-chart{border:1px solid #d8d2c4;border-radius:3px;background:#fff;padding:6px;margin:7px 0}
+  .report-page .rp-note{font-size:8px;color:#7a7f88;font-style:italic}
+
+  .export-format{display:flex;align-items:center;gap:9px;padding:8px 9px;border:1px solid var(--line);border-radius:7px;margin-bottom:6px;background:rgba(18,30,51,.45);cursor:pointer}
+  .export-format.on{border-color:rgba(53,208,186,.42);background:var(--cyan-dim)}
+  .export-format .fi{width:26px;height:26px;border-radius:6px;display:grid;place-items:center;background:var(--panel-3);border:1px solid var(--line);font-size:8px;font-family:var(--mono);color:var(--text-2)}
+  .export-format .t{font-size:11px}
+  .export-format .s{font-size:9px;color:var(--muted)}
+  .export-format .ck{margin-left:auto;color:var(--cyan);opacity:0}
+  .export-format.on .ck{opacity:1}
+
+  .provider-item{display:flex;gap:9px;align-items:center;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:rgba(18,30,51,.5);margin-bottom:7px;cursor:pointer}
+  .provider-item.on{border-color:rgba(53,208,186,.4);background:rgba(53,208,186,.06)}
+  .provider-logo{width:30px;height:30px;border-radius:7px;display:grid;place-items:center;background:var(--panel-3);border:1px solid var(--line);font-size:9px;font-family:var(--mono);color:var(--text-2);flex:0 0 auto}
+  .provider-item .t{font-size:11px}
+  .provider-item .s{font-size:9px;color:var(--muted);margin-top:1px}
+  .provider-item .st{margin-left:auto;flex:0 0 auto}
+
+  .dag{position:relative;height:270px;border:1px solid var(--line);border-radius:10px;background:
+    radial-gradient(560px 220px at 40% 20%,rgba(53,208,186,.06),transparent 70%),
+    linear-gradient(180deg,rgba(8,15,27,.55),rgba(10,19,34,.7));overflow:hidden}
+  .dag svg{position:absolute;inset:0;width:100%;height:100%}
+  .dag-node{position:absolute;transform:translate(-50%,-50%);min-width:86px;padding:7px 9px;border-radius:8px;border:1px solid var(--line-2);background:#101c30;text-align:center;z-index:2;box-shadow:0 6px 16px rgba(0,0,0,.25)}
+  .dag-node .t{font-size:10px;color:var(--text)}
+  .dag-node .s{font-size:8.5px;color:var(--muted);margin-top:1px;font-family:var(--mono)}
+  .dag-node.done{border-color:rgba(53,208,186,.38)}
+  .dag-node.active{border-color:rgba(139,124,255,.55);box-shadow:0 0 22px rgba(139,124,255,.2)}
+  .dag-node.warn{border-color:rgba(242,184,75,.4)}
+
+  .code{font-family:var(--mono);font-size:10px;line-height:1.7;background:rgba(6,12,22,.65);border:1px solid var(--line);border-radius:8px;padding:10px 12px;overflow:auto;max-height:260px;color:#b9c9df;white-space:pre}
+  .code .kw{color:#c9b4ff}.code .st{color:#9fe6c8}.code .cm{color:#5c708d}.code .fn{color:#8fc7ff}.code .nm{color:#f2b84b}
+
+  .settings-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:14px}
+  .setting-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:11px 0;border-bottom:1px solid rgba(30,45,71,.6)}
+  .setting-row:last-child{border-bottom:0}
+  .setting-row .t{font-size:11.5px}
+  .setting-row .s{font-size:9.5px;color:var(--muted);margin-top:2px;max-width:360px}
+  .setting-row .ctl{flex:0 0 auto;display:flex;align-items:center;gap:8px}
+  .setting-row .select{width:150px}
+  .setting-row .input{width:150px}
+
+  .toast-wrap{position:fixed;right:22px;bottom:22px;z-index:90;display:flex;flex-direction:column;gap:8px;align-items:flex-end}
+  .toast{display:flex;align-items:center;gap:9px;padding:10px 13px;border-radius:9px;border:1px solid rgba(53,208,186,.35);background:rgba(12,27,40,.96);box-shadow:var(--shadow);font-size:11.5px;color:var(--text);animation:toastIn .2s ease}
+  .toast .ic{color:var(--cyan)}
+  @keyframes toastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+  .modal-backdrop{position:fixed;inset:0;background:rgba(3,7,14,.68);backdrop-filter:blur(6px);z-index:80;display:none;align-items:center;justify-content:center;padding:24px}
+  .modal-backdrop.open{display:flex}
+  .modal{width:min(920px,100%);max-height:88vh;overflow:auto;border-radius:14px;border:1px solid var(--line-2);background:linear-gradient(180deg,#101b2e,#0b1423);box-shadow:var(--shadow);animation:modalIn .18s ease}
+  @keyframes modalIn{from{opacity:0;transform:translateY(10px) scale(.985)}to{opacity:1;transform:none}}
+  .modal-head{display:flex;align-items:flex-start;gap:12px;padding:16px 18px;border-bottom:1px solid var(--line)}
+  .modal-head h3{margin:0;font-size:14px}
+  .modal-head p{margin:3px 0 0;font-size:10.5px;color:var(--muted)}
+  .modal-head .x{margin-left:auto;width:28px;height:28px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--text-2);display:grid;place-items:center}
+  .modal-body{padding:16px 18px}
+  .modal-foot{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid var(--line)}
+  .cand-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+  .cand{border:1px solid var(--line);border-radius:10px;padding:10px;background:rgba(18,30,51,.6);cursor:pointer;transition:.16s}
+  .cand:hover{border-color:var(--line-2);transform:translateY(-1px)}
+  .cand.best{border-color:rgba(53,208,186,.5);background:rgba(53,208,186,.07);box-shadow:0 0 24px rgba(53,208,186,.1)}
+  .cand .ct{display:flex;align-items:center;gap:6px}
+  .cand .ct b{font-size:11.5px;font-weight:600}
+  .cand .ct .score{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--cyan)}
+  .cand .thumb2{height:78px;border-radius:7px;border:1px solid var(--line);background:linear-gradient(180deg,#0a1628,#0d1c31);margin:8px 0;position:relative;overflow:hidden}
+  .cand .thumb2 svg{position:absolute;inset:0;width:100%;height:100%}
+  .cand .why{font-size:9.5px;color:var(--muted);line-height:1.5;min-height:42px}
+  .cand .pick{margin-top:8px;width:100%}
+
+  .palette{position:fixed;left:50%;top:18%;transform:translateX(-50%);width:min(560px,92vw);z-index:85;display:none}
+  .palette.open{display:block}
+  .palette .modal{width:100%}
+  .palette input{width:100%;padding:12px 14px;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--text);font-size:13px;outline:none}
+  .palette .plist{padding:6px}
+  .palette .pitem{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:7px;font-size:11.5px;color:var(--text-2);cursor:pointer}
+  .palette .pitem:hover{background:rgba(53,208,186,.08);color:var(--text)}
+  .palette .pitem .k{margin-left:auto;font-family:var(--mono);font-size:9px;color:var(--muted)}
+
+  .footer-note{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:22px;padding-top:12px;border-top:1px solid var(--line);font-size:9.5px;color:var(--muted)}
+  .sep{height:1px;background:var(--line);margin:14px 0}
+  .mt8{margin-top:8px}.mt10{margin-top:10px}.mt14{margin-top:14px}.mt18{margin-top:18px}
+  .flex{display:flex;gap:10px;align-items:center}.between{justify-content:space-between}.wrap{flex-wrap:wrap}
+  .muted{color:var(--muted)}.small{font-size:10.5px}.tiny{font-size:9.5px}
+  .nowrap{white-space:nowrap}
+  .right{margin-left:auto}
+  .tr{text-align:right}
+
+  @media (max-width:1400px){
+    .split-3{grid-template-columns:232px minmax(0,1fr) 280px}
+    .split-3b{grid-template-columns:250px minmax(0,1fr) 270px}
+    .search{width:190px}
+  }
+  @media (max-width:1180px){
+    .g-4{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .split-3,.split-3b,.split-2-1,.split-1-2{grid-template-columns:1fr}
+    .sidebar{position:fixed;left:-260px;transition:.2s}
+    .shell{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#35d0ba" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z"/><path d="M12 12v9M4 7.5l8 4.5 8-4.5"/></svg>
+      </div>
+      <div>
+        <div class="brand-name">ADVP</div>
+        <div class="brand-sub">AUTOMATED DATA VIZ</div>
+      </div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-label" data-i18n="nav.workspace">工作台</div>
+      <button class="nav-item active" data-page="p01">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9.5 21v-6h5v6"/></svg>
+        <span data-i18n="nav.home">工程首页</span>
+      </button>
+      <button class="nav-item" data-page="p02">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 17v3h16v-3"/></svg>
+        <span data-i18n="nav.import">数据导入</span>
+      </button>
+      <button class="nav-item" data-page="p03">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><path d="M7 16V9M12 16V5M17 16v-4"/></svg>
+        <span data-i18n="nav.quality">数据质量</span>
+      </button>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-label" data-i18n="nav.analysis">分析</div>
+      <button class="nav-item" data-page="p04">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="4"/><path d="m5.6 5.6 2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+        <span data-i18n="nav.pipeline">AI 管线</span>
+        <span class="nav-badge">LIVE</span>
+      </button>
+      <button class="nav-item" data-page="p05">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V4"/><path d="M4 20h16"/><path d="m7 15 4-5 3 3 5-7"/></svg>
+        <span data-i18n="nav.viz2d">2D 工作台</span>
+      </button>
+      <button class="nav-item" data-page="p06">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></svg>
+        <span data-i18n="nav.viz3d">3D 科学视图</span>
+      </button>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-label" data-i18n="nav.delivery">交付</div>
+      <button class="nav-item" data-page="p07">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/><path d="M10 12h5M10 16h5"/></svg>
+        <span data-i18n="nav.report">报告与导出</span>
+      </button>
+      <button class="nav-item" data-page="p09">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.4"/><circle cx="18" cy="6" r="2.4"/><circle cx="12" cy="18" r="2.4"/><path d="M7.6 7.6 11 15.6M16.4 7.6 13 15.6M8.4 6h7.2"/></svg>
+        <span data-i18n="nav.trace">追溯与审计</span>
+      </button>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-label" data-i18n="nav.system">系统</div>
+      <button class="nav-item" data-page="p08">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21h-4v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3v-4h.05A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3h4v.05A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.55 1H21v4h-.05a1.7 1.7 0 0 0-1.55 1Z"/></svg>
+        <span data-i18n="nav.provider">Provider 设置</span>
+      </button>
+      <button class="nav-item" data-page="p10">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></svg>
+        <span data-i18n="nav.settings">设置与关于</span>
+      </button>
+    </div>
+
+    <div class="side-foot">
+      <div class="side-card">
+        <div class="row"><span>本地服务</span><span class="mono">127.0.0.1</span></div>
+        <div class="row" style="margin-top:6px"><span>运行状态</span><span class="val" style="display:flex;align-items:center;gap:5px"><i class="dot"></i>正常</span></div>
+        <div class="row" style="margin-top:6px"><span>GPU</span><span class="mono">自动检测</span></div>
+      </div>
+      <div class="side-version"><span>v0.1.0 · 原型</span><span>MIT/Apache</span></div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="crumbs"><span>ADVP</span><span>/</span><b id="crumb">工程首页</b></div>
+      <div class="top-title">
+        <h1 id="topTitle">工程首页</h1>
+        <p id="topSub">本地工作区 · 最近 7 天</p>
+      </div>
+      <div class="top-actions">
+        <div class="search" id="searchBtn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+          <span>搜索工程、图表、任务</span><kbd>Ctrl K</kbd>
+        </div>
+        <span class="proto-badge">交互原型 v0.1.0</span>
+        <button class="icon-btn lang-btn" id="langBtn" title="切换语言">中 / EN</button>
+        <button class="icon-btn" title="帮助">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.4 2.3c-.6.25-.9.7-.9 1.3v.4"/><path d="M12 17h.01"/></svg>
+        </button>
+        <button class="icon-btn" title="任务队列">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16M4 12h10M4 18h7"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="content">
+
+      <!-- P01 -->
+      <section class="page active" id="page-p01">
+        <div class="hero">
+          <div>
+            <div class="eyebrow">AUTOMATED DATA VISUALIZATION PLATFORM</div>
+            <h2>把数据交给 AI，把判断留给你。</h2>
+            <p>从接入、清洗、分析到选图与报告，全自动完成；每一步可解释、可撤销、可复现。面向科研 3D 与复杂数据分析。</p>
+            <div class="suggest">
+              <span class="pill cyan"><i class="dot-s"></i>科研 3D</span>
+              <span class="pill violet">体渲染 / 流场</span>
+              <span class="pill blue">OpenAI / Anthropic</span>
+              <span class="pill">本地优先</span>
+            </div>
+          </div>
+          <div class="head-actions">
+            <button class="btn ghost" data-jump="p02">导入数据</button>
+            <button class="btn primary" data-jump="p02">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+              新建工程
+            </button>
+          </div>
+        </div>
+
+        <div class="grid g-4">
+          <div class="card stat">
+            <div class="k">进行中工程</div><div class="v">12</div><div class="d"><span class="up">+3</span> 本周新增</div>
+            <svg class="spark" width="66" height="24" viewBox="0 0 66 24" fill="none"><path d="M1 19c6-2 8-8 13-7s7 6 12 4 7-9 12-8 7 7 12 5 7-7 11-9" stroke="#35d0ba" stroke-width="1.6" stroke-linecap="round" opacity=".85"/></svg>
+          </div>
+          <div class="card stat">
+            <div class="k">本周任务</div><div class="v">38</div><div class="d"><span class="up">+12%</span> 对比上周</div>
+            <svg class="spark" width="66" height="24" viewBox="0 0 66 24" fill="none"><path d="M1 18c5 1 8-5 12-4s6 7 11 5 7-8 12-7 7 6 11 3 8-8 12-9" stroke="#5aa9ff" stroke-width="1.6" stroke-linecap="round" opacity=".85"/></svg>
+          </div>
+          <div class="card stat">
+            <div class="k">任务成功率</div><div class="v">96.4<span style="font-size:13px;color:var(--muted)">%</span></div><div class="d"><span class="warn">2 次降级</span> · 已记录</div>
+            <svg class="spark" width="66" height="24" viewBox="0 0 66 24" fill="none"><path d="M1 7c6 0 8 6 13 6s7-8 12-8 7 9 12 9 7-6 12-6 7 3 11 3" stroke="#8b7cff" stroke-width="1.6" stroke-linecap="round" opacity=".85"/></svg>
+          </div>
+          <div class="card stat">
+            <div class="k">本月 AI 成本</div><div class="v">$12.40</div><div class="d">预算 $50.00 · <span class="up">24.8%</span></div>
+            <svg class="spark" width="66" height="24" viewBox="0 0 66 24" fill="none"><path d="M1 17c6 0 8-6 13-6s7 7 12 7 7-8 12-8 7 5 12 5 7-4 11-4" stroke="#f2b84b" stroke-width="1.6" stroke-linecap="round" opacity=".85"/></svg>
+          </div>
+        </div>
+
+        <div class="grid split-2-1 mt14">
+          <div class="card">
+            <div class="card-head"><h3>最近工程</h3><div class="flex"><span class="sub">按更新时间排序</span><button class="btn small ghost">查看全部</button></div></div>
+            <div class="card-body">
+              <div class="grid g-2">
+                <div class="project-card" data-jump="p03">
+                  <div class="thumb">
+                    <span class="pill cyan tag">NetCDF</span>
+                    <svg viewBox="0 0 320 92" preserveAspectRatio="none"><defs><linearGradient id="g1" x1="0" x2="1"><stop offset="0" stop-color="#35d0ba" stop-opacity=".15"/><stop offset="1" stop-color="#8b7cff" stop-opacity=".35"/></linearGradient></defs><path d="M0 70 C40 62 55 34 95 40 S150 70 190 54 240 18 280 26 310 40 320 34 V92 H0Z" fill="url(#g1)"/><path d="M0 70 C40 62 55 34 95 40 S150 70 190 54 240 18 280 26 310 40 320 34" stroke="#35d0ba" stroke-width="1.4" fill="none"/><path d="M0 78 C50 70 70 50 110 56 S170 82 210 66 260 36 300 44 320 52 320 52" stroke="#8b7cff" stroke-width="1" fill="none" opacity=".8"/></svg>
+                  </div>
+                  <div class="project-meta">
+                    <h4>全球气温异常场 · 2025</h4>
+                    <div class="sub"><span>3D 体渲染 · 4 图</span><span>2h 前</span></div>
+                    <div class="bar"><i style="width:82%"></i></div>
+                  </div>
+                </div>
+                <div class="project-card" data-jump="p05">
+                  <div class="thumb">
+                    <span class="pill violet tag">CSV</span>
+                    <svg viewBox="0 0 320 92" preserveAspectRatio="none"><g stroke="#243b5c" stroke-width="1"><path d="M0 22h320M0 46h320M0 70h320"/></g><g fill="#5aa9ff" opacity=".55"><rect x="26" y="52" width="22" height="30"/><rect x="62" y="38" width="22" height="44"/><rect x="98" y="58" width="22" height="24"/><rect x="134" y="30" width="22" height="52"/><rect x="170" y="44" width="22" height="38"/><rect x="206" y="24" width="22" height="58"/><rect x="242" y="40" width="22" height="42"/><rect x="278" y="34" width="22" height="48"/></g><path d="M26 60 118 44 200 36 300 24" stroke="#35d0ba" stroke-width="1.4" fill="none"/></svg>
+                  </div>
+                  <div class="project-meta">
+                    <h4>Q3 销售与区域对比</h4>
+                    <div class="sub"><span>2D 仪表盘 · 6 图</span><span>昨天</span></div>
+                    <div class="bar"><i style="width:64%"></i></div>
+                  </div>
+                </div>
+                <div class="project-card" data-jump="p06">
+                  <div class="thumb">
+                    <span class="pill blue tag">DICOM</span>
+                    <svg viewBox="0 0 320 92" preserveAspectRatio="none"><g><ellipse cx="160" cy="46" rx="58" ry="44" fill="none" stroke="#5aa9ff" stroke-opacity=".45"/><ellipse cx="160" cy="46" rx="38" ry="30" fill="none" stroke="#8b7cff" stroke-opacity=".5"/><ellipse cx="160" cy="46" rx="20" ry="16" fill="#35d0ba" fill-opacity=".18" stroke="#35d0ba" stroke-opacity=".5"/><circle cx="154" cy="42" r="2" fill="#dffaf5"/><circle cx="168" cy="52" r="1.5" fill="#dffaf5"/></g></svg>
+                  </div>
+                  <div class="project-meta">
+                    <h4>脑部 MRI 切片标注</h4>
+                    <div class="sub"><span>影像切片 · 12 图</span><span>2 天前</span></div>
+                    <div class="bar"><i style="width:46%"></i></div>
+                  </div>
+                </div>
+                <div class="project-card" data-jump="p09">
+                  <div class="thumb">
+                    <span class="pill amber tag">SQL</span>
+                    <svg viewBox="0 0 320 92" preserveAspectRatio="none"><g fill="none" stroke="#f2b84b" stroke-opacity=".5"><circle cx="80" cy="30" r="14"/><circle cx="160" cy="52" r="18"/><circle cx="240" cy="28" r="12"/><circle cx="110" cy="70" r="9"/><circle cx="220" cy="68" r="10"/></g><g stroke="#f2b84b" stroke-opacity=".35"><path d="M93 33 142 48M176 47 228 32M170 65 212 68M94 36 106 64M226 38 220 58"/></g></svg>
+                  </div>
+                  <div class="project-meta">
+                    <h4>供应链关系网络</h4>
+                    <div class="sub"><span>网络图 · 3 图</span><span>3 天前</span></div>
+                    <div class="bar"><i style="width:71%"></i></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid" style="align-content:start">
+            <div class="card">
+              <div class="card-head"><h3>系统状态</h3><span class="pill green"><i class="dot-s"></i>健康</span></div>
+              <div class="card-body">
+                <div class="status-row"><span class="lbl">本地服务</span><span class="val"><i class="dot"></i>127.0.0.1:5173</span></div>
+                <div class="status-row"><span class="lbl">主 Provider</span><span class="val"><span class="pill cyan">OpenAI 兼容</span>gpt-4.1</span></div>
+                <div class="status-row"><span class="lbl">备用 Provider</span><span class="val"><span class="pill violet">Anthropic</span>claude-sonnet</span></div>
+                <div class="status-row"><span class="lbl">GPU</span><span class="val">集显 · 已降级</span></div>
+                <div class="status-row"><span class="lbl">工作区磁盘</span><span class="val"><span class="meter"><i style="width:42%"></i></span>42%</span></div>
+                <div class="status-row"><span class="lbl">任务队列</span><span class="val">1 运行 / 1 等待</span></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>最近活动</h3><span class="sub">实时</span></div>
+              <div class="card-body">
+                <div class="list">
+                  <div class="list-item"><div class="li-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v18M5 8l7-5 7 5"/></svg></div><div class="li-main"><div class="t">气温场体渲染完成</div><div class="s">3 图 · 1.2GB · 降采样 2x</div></div><div class="li-time">2m</div></div>
+                  <div class="list-item"><div class="li-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></div><div class="li-main"><div class="t">Q3 销售报告导出</div><div class="s">PDF · 3.4MB · 已加入下载</div></div><div class="li-time">18m</div></div>
+                  <div class="list-item"><div class="li-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 17 9 7l4 7 3-4 4 7"/></svg></div><div class="li-main"><div class="t">选图评分触发 Top3</div><div class="s">低置信度 · 已采用最高分</div></div><div class="li-time">31m</div></div>
+                  <div class="list-item"><div class="li-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12h14M12 5v14"/></svg></div><div class="li-main"><div class="t">新增 Provider 备用配置</div><div class="s">Anthropic · 连接测试通过</div></div><div class="li-time">1h</div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="footer-note"><span>ADVP v0.1.0 · 高保真交互原型 · 数据为演示用途</span><span class="mono">docs/prototype/index.html</span></div>
+      </section>
+
+      <!-- P02 -->
+      <section class="page" id="page-p02">
+        <div class="page-head">
+          <div>
+            <div class="eyebrow">INGEST / EXTRACT</div>
+            <h2>导入数据</h2>
+            <p>支持文件、数据库、远程 URL、PDF/Word 表格与实时流。导入前完成类型识别、质量预检与敏感字段标记。</p>
+          </div>
+          <div class="head-actions">
+            <span class="pill green"><i class="dot-s"></i>本地处理</span>
+            <button class="btn ghost" data-jump="p03">跳过预览</button>
+            <button class="btn primary" id="confirmImport">确认导入 2 个数据集</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head" style="padding:12px 14px">
+            <div class="tabs" data-tab-group="ingest">
+              <button class="tab active" data-tab="file">文件</button>
+              <button class="tab" data-tab="db">数据库</button>
+              <button class="tab" data-tab="url">远程 URL</button>
+              <button class="tab" data-tab="doc">PDF / Word</button>
+              <button class="tab" data-tab="stream">实时流</button>
+            </div>
+            <div class="flex small muted"><span class="mono">工作区</span><span>workspace/global-temp</span></div>
+          </div>
+          <div class="card-body">
+            <div class="tab-panel active" data-panel="file">
+              <div class="grid split-2-1">
+                <div>
+                  <div class="dropzone">
+                    <div class="dz-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 16v4h16v-4"/></svg></div>
+                    <h4>拖拽文件到此处，或点击选择</h4>
+                    <p>CSV / Excel / JSON / Parquet / HDF5 / NetCDF / FITS / DICOM / NIfTI / RAW</p>
+                    <button class="btn small" id="browseBtn">选择文件</button>
+                    <div class="tiny muted" style="margin-top:9px">单文件上限 5GB · 大文件将自动分块与采样 · 原始数据只读</div>
+                  </div>
+                  <div class="file-row"><div class="fi"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/></svg></div><div class="nm">global_temp_2025.nc</div><div class="sz">812 MB</div><span class="ok">解析完成</span><span class="pill cyan">NetCDF</span></div>
+                  <div class="file-row"><div class="fi"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/></svg></div><div class="nm">station_metadata.csv</div><div class="sz">2.1 MB</div><span class="spin"></span><span class="pill">类型识别中</span></div>
+                  <div class="grid g-3 mt14">
+                    <div class="card" style="padding:11px"><div class="tiny muted">已识别变量</div><div style="font-size:17px;font-weight:650">14</div><div class="tiny muted">temperature / pressure / wind_u …</div></div>
+                    <div class="card" style="padding:11px"><div class="tiny muted">坐标维度</div><div style="font-size:17px;font-weight:650">3D</div><div class="tiny muted">time × lat × lon</div></div>
+                    <div class="card" style="padding:11px"><div class="tiny muted">预计内存峰值</div><div style="font-size:17px;font-weight:650">1.8 GB</div><div class="tiny muted">分块 + 降采样后</div></div>
+                  </div>
+                </div>
+                <div class="card" style="background:rgba(10,19,34,.55)">
+                  <div class="card-head"><h3>识别设置</h3><span class="pill blue">自动</span></div>
+                  <div class="card-body">
+                    <div class="form-grid">
+                      <div class="field"><label>编码</label><select class="select"><option>自动检测（UTF-8）</option><option>GBK</option><option>Latin-1</option></select></div>
+                      <div class="field"><label>分隔符</label><select class="select"><option>自动（,）</option><option>制表符</option><option>分号</option></select></div>
+                      <div class="field"><label>表头行</label><input class="input" value="1"></div>
+                      <div class="field"><label>采样行数</label><input class="input" value="100"></div>
+                      <div class="field full"><label>工作表 / 变量</label><select class="select"><option>temperature (time, lat, lon)</option><option>pressure (time, lat, lon)</option><option>wind_u (time, lat, lon)</option></select></div>
+                      <div class="field full"><label>缺失值标记</label><input class="input" value="-9999, NaN, 空字符串"></div>
+                    </div>
+                    <div class="sep"></div>
+                    <div class="flex between"><span class="small">发送给 AI 的上下文</span><span class="pill cyan">仅元数据 + 100 行样本</span></div>
+                    <div class="tiny muted mt8">字段名、类型、统计量与前 100 行；敏感字段自动脱敏。可在 Provider 设置中调整。</div>
+                    <div class="sep"></div>
+                    <div class="flex between"><span class="small">检测到 2 个敏感字段</span><button class="btn small ghost" data-jump="p03">查看</button></div>
+                    <div class="mt8"><span class="pill amber">station_owner</span> <span class="pill amber">contact_email</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="db">
+              <div class="grid split-2-1">
+                <div class="card" style="background:rgba(10,19,34,.55)">
+                  <div class="card-head"><h3>数据库连接</h3><span class="pill green">只读</span></div>
+                  <div class="card-body">
+                    <div class="form-grid">
+                      <div class="field"><label>类型</label><select class="select"><option>PostgreSQL</option><option>MySQL</option><option>SQLite</option></select></div>
+                      <div class="field"><label>主机 / 文件</label><input class="input" value="127.0.0.1:5432"></div>
+                      <div class="field"><label>数据库</label><input class="input" value="research"></div>
+                      <div class="field"><label>Schema</label><input class="input" value="public"></div>
+                      <div class="field"><label>用户名</label><input class="input" value="analyst"></div>
+                      <div class="field"><label>密码</label><input class="input" type="password" value="••••••••••••"></div>
+                    </div>
+                    <div class="flex mt14"><button class="btn small" id="testDb">测试连接</button><span class="tiny muted">密码保存至 Windows 凭据管理器</span></div>
+                    <div class="sep"></div>
+                    <div class="field"><label>SQL 查询</label><textarea class="input mono" rows="5">SELECT station_id, observed_at, temperature, pressure
+FROM observations
+WHERE observed_at >= '2025-01-01'
+LIMIT 100000;</textarea></div>
+                    <div class="flex mt10"><button class="btn small primary">预览结果</button><span class="tiny muted">行数上限 100,000 · 超时 30s</span></div>
+                  </div>
+                </div>
+                <div class="card" style="background:rgba(10,19,34,.55)">
+                  <div class="card-head"><h3>库表浏览</h3><span class="sub">research</span></div>
+                  <div class="card-body">
+                    <div class="list">
+                      <div class="list-item"><div class="li-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/></svg></div><div class="li-main"><div class="t">observations</div><div class="s">1.2M 行 · 18 列 · 上次同步 2h 前</div></div><button class="btn small ghost">选择</button></div>
+                      <div class="list-item"><div class="li-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/></svg></div><div class="li-main"><div class="t">stations</div><div class="s">8,420 行 · 12 列</div></div><button class="btn small ghost">选择</button></div>
+                      <div class="list-item"><div class="li-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/></svg></div><div class="li-main"><div class="t">qc_flags</div><div class="s">42k 行 · 6 列</div></div><button class="btn small ghost">选择</button></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="url">
+              <div class="grid split-2-1">
+                <div class="card" style="background:rgba(10,19,34,.55)">
+                  <div class="card-head"><h3>远程数据</h3><span class="pill blue">HTTP / S3</span></div>
+                  <div class="card-body">
+                    <div class="form-grid">
+                      <div class="field full"><label>URL</label><input class="input" value="https://data.example.org/climate/2025/annual.csv"></div>
+                      <div class="field"><label>认证方式</label><select class="select"><option>Bearer Token</option><option>Basic</option><option>API Key Header</option><option>无</option></select></div>
+                      <div class="field"><label>超时（秒）</label><input class="input" value="60"></div>
+                      <div class="field full"><label>自定义 Header</label><textarea class="input mono" rows="3">Accept: text/csv
+X-Project: advp</textarea></div>
+                    </div>
+                    <div class="flex mt14"><button class="btn small">测试访问</button><button class="btn small primary">流式导入</button><span class="tiny muted">遵守站点条款与 robots</span></div>
+                    <div class="sep"></div>
+                    <div class="flex between"><span class="small">S3 兼容对象存储</span><span class="pill">可选</span></div>
+                    <div class="form-grid mt10">
+                      <div class="field"><label>Endpoint</label><input class="input" value="https://s3.example.com"></div>
+                      <div class="field"><label>Bucket</label><input class="input" value="research-data"></div>
+                      <div class="field"><label>Prefix</label><input class="input" value="climate/2025/"></div>
+                      <div class="field"><label>Region</label><input class="input" value="auto"></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="card" style="background:rgba(10,19,34,.55)"><div class="card-head"><h3>响应预览</h3><span class="sub">等待测试</span></div><div class="card-body"><div class="tiny muted">连接后将显示状态码、Content-Type、文件大小与前 5 行内容。动态网页将使用内置无头浏览器渲染。</div></div></div>
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="doc">
+              <div class="grid split-2-1">
+                <div>
+                  <div class="dropzone">
+                    <div class="dz-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/><path d="M10 12h5M10 16h5"/></svg></div>
+                    <h4>上传 PDF 或 Word 文档</h4>
+                    <p>自动识别表格区域与表头；不做 OCR，扫描件将提示无法解析</p>
+                    <button class="btn small">选择文档</button>
+                  </div>
+                  <div class="file-row"><div class="fi">PDF</div><div class="nm">annual_report_2025.pdf</div><div class="sz">18 MB</div><span class="ok">发现 6 个候选表格</span></div>
+                  <div class="grid g-3 mt14">
+                    <div class="card cand" style="padding:10px"><div class="ct"><b>Table 3-1</b><span class="score">0.94</span></div><div class="thumb2"><svg viewBox="0 0 200 78"><g stroke="#2a3d5c"><path d="M10 20h180M10 36h180M10 52h180M10 68h180M50 10v60M100 10v60M150 10v60"/></g><g fill="#35d0ba" opacity=".35"><rect x="10" y="20" width="40" height="16"/><rect x="50" y="20" width="50" height="16"/></g></svg></div><div class="tiny muted">区域统计 · 8 列 × 24 行</div></div>
+                    <div class="card cand" style="padding:10px"><div class="ct"><b>Table 4-2</b><span class="score">0.81</span></div><div class="thumb2"><svg viewBox="0 0 200 78"><g stroke="#2a3d5c"><path d="M10 24h180M10 44h180M10 64h180M70 12v54M130 12v54"/></g><g fill="#8b7cff" opacity=".3"><rect x="10" y="24" width="60" height="20"/></g></svg></div><div class="tiny muted">年度对比 · 5 列 × 12 行</div></div>
+                    <div class="card cand" style="padding:10px"><div class="ct"><b>Table A-1</b><span class="score">0.62</span></div><div class="thumb2"><svg viewBox="0 0 200 78"><g stroke="#2a3d5c"><path d="M10 26h180M10 50h180M40 12v54M90 12v54M140 12v54"/></g><g fill="#5aa9ff" opacity=".25"><rect x="40" y="26" width="50" height="24"/></g></svg></div><div class="tiny muted">附录 · 6 列 × 40 行</div></div>
+                  </div>
+                </div>
+                <div class="card" style="background:rgba(10,19,34,.55)"><div class="card-head"><h3>抽取设置</h3><span class="pill amber">无 OCR</span></div><div class="card-body"><div class="check" style="margin-bottom:8px"><input type="checkbox" checked> 保留表头样式与合并单元格</div><div class="check" style="margin-bottom:8px"><input type="checkbox" checked> 自动清理换行与空白</div><div class="check" style="margin-bottom:8px"><input type="checkbox"> 将脚注作为字段说明</div><div class="sep"></div><div class="tiny muted">扫描件、图片型 PDF 无法解析；请先使用外部 OCR 转为可选中文本。</div><button class="btn primary mt14" style="width:100%">确认抽取 Table 3-1</button></div></div>
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="stream">
+              <div class="grid split-2-1">
+                <div class="card" style="background:rgba(10,19,34,.55)">
+                  <div class="card-head"><h3>实时流连接</h3><span class="pill green">试连中</span></div>
+                  <div class="card-body">
+                    <div class="form-grid">
+                      <div class="field"><label>协议</label><select class="select"><option>WebSocket</option><option>Kafka</option></select></div>
+                      <div class="field"><label>地址</label><input class="input" value="wss://stream.example.org/sensors"></div>
+                      <div class="field"><label>消息格式</label><select class="select"><option>JSON Lines</option><option>Protobuf</option><option>CSV</option></select></div>
+                      <div class="field"><label>窗口大小</label><input class="input" value="60s"></div>
+                    </div>
+                    <div class="sep"></div>
+                    <div class="flex between"><span class="small">5 秒样例</span><span class="pill cyan">1,000 条/秒</span></div>
+                    <div class="code mt8">{"ts":"2026-10-22T10:31:02Z","station":"S-042","temp":18.4,"pressure":1012.3}
+{"ts":"2026-10-22T10:31:02Z","station":"S-043","temp":19.1,"pressure":1011.8}
+{"ts":"2026-10-22T10:31:03Z","station":"S-042","temp":18.5,"pressure":1012.2}</div>
+                    <div class="flex mt14"><button class="btn small primary">开始接入</button><button class="btn small ghost">断开</button><span class="tiny muted">默认仅保留窗口内数据</span></div>
+                  </div>
+                </div>
+                <div class="card" style="background:rgba(10,19,34,.55)"><div class="card-head"><h3>实时预览</h3><span class="sub">最近 60 秒</span></div><div class="card-body"><svg viewBox="0 0 320 140" style="width:100%"><g stroke="#1e2d47"><path d="M20 115h280M20 85h280M20 55h280M20 25h280"/></g><path d="M20 92c20-4 26-18 42-16s22 12 34 8 20-20 34-14 24 16 38 10 22-18 36-14 22 14 34 10 20-12 32-14 22 6 30 2" stroke="#35d0ba" stroke-width="1.8" fill="none"/><path d="M20 100c20 2 26-10 42-8s22 14 34 10 20-12 34-8 24 12 38 6 22-14 36-10 22 10 34 6 20-8 32-10 22 4 30 0" stroke="#8b7cff" stroke-width="1.2" fill="none" opacity=".8"/></svg><div class="flex small muted"><span class="pill green"><i class="dot-s"></i>连接稳定</span><span class="right">延迟 42ms</span></div></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card mt14">
+          <div class="card-head"><h3>数据预览</h3><div class="flex"><span class="sub">前 20 行 · 采样</span><span class="pill">42 列</span><span class="pill">1.2M 行</span><button class="btn small ghost">切换字段</button></div></div>
+          <div class="table-wrap" style="border:0;border-radius:0;max-height:280px">
+            <table>
+              <thead><tr><th>time</th><th>station_id</th><th>latitude</th><th>longitude</th><th>temperature</th><th>pressure</th><th>wind_u</th><th>quality</th></tr></thead>
+              <tbody>
+                <tr><td class="mono">2025-01-01 00:00</td><td>S-042</td><td class="num">39.9042</td><td class="num">116.4074</td><td class="num">-2.4</td><td class="num">1012.3</td><td class="num">3.2</td><td><span class="pill green">A</span></td></tr>
+                <tr><td class="mono">2025-01-01 00:00</td><td>S-043</td><td class="num">31.2304</td><td class="num">121.4737</td><td class="num">5.1</td><td class="num">1018.7</td><td class="num">1.8</td><td><span class="pill green">A</span></td></tr>
+                <tr><td class="mono">2025-01-01 01:00</td><td>S-042</td><td class="num">39.9042</td><td class="num">116.4074</td><td class="num">-2.8</td><td class="num">1012.1</td><td class="num">3.6</td><td><span class="pill amber">B</span></td></tr>
+                <tr><td class="mono">2025-01-01 01:00</td><td>S-043</td><td class="num">31.2304</td><td class="num">121.4737</td><td class="num">4.8</td><td class="num">1018.5</td><td class="num">2.0</td><td><span class="pill green">A</span></td></tr>
+                <tr><td class="mono">2025-01-01 02:00</td><td>S-042</td><td class="num">39.9042</td><td class="num">116.4074</td><td class="null">NULL</td><td class="num">1011.8</td><td class="num">4.1</td><td><span class="pill red">缺测</span></td></tr>
+                <tr><td class="mono">2025-01-01 02:00</td><td>S-043</td><td class="num">31.2304</td><td class="num">121.4737</td><td class="num">4.5</td><td class="num">1018.2</td><td class="num">2.4</td><td><span class="pill green">A</span></td></tr>
+                <tr><td class="mono">2025-01-01 03:00</td><td>S-042</td><td class="num">39.9042</td><td class="num">116.4074</td><td class="num">-3.1</td><td class="num">1011.6</td><td class="num">4.8</td><td><span class="pill amber">B</span></td></tr>
+                <tr><td class="mono">2025-01-01 03:00</td><td>S-043</td><td class="num">31.2304</td><td class="num">121.4737</td><td class="num">4.2</td><td class="num">1018.0</td><td class="num">2.6</td><td><span class="pill green">A</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- P03 -->
+      <section class="page" id="page-p03">
+        <div class="page-head">
+          <div>
+            <div class="eyebrow">PROFILE / QUALITY</div>
+            <h2>数据预览与质量</h2>
+            <p>global_temp_2025.nc · 1.2M 行 · 42 列 · 812MB · 采样 12% · 原始文件只读</p>
+          </div>
+          <div class="head-actions">
+            <span class="pill green"><i class="dot-s"></i>质量评分 86</span>
+            <button class="btn ghost" data-jump="p02">更换数据</button>
+            <button class="btn primary" data-jump="p04">开始 AI 分析</button>
+          </div>
+        </div>
+
+        <div class="grid split-3">
+          <div class="card" style="align-self:start">
+            <div class="card-head"><h3>字段</h3><span class="sub">42</span></div>
+            <div class="card-body" style="padding:10px">
+              <input class="input" placeholder="搜索字段…">
+              <div class="mt10">
+                <div class="list-item" style="padding:7px 4px"><div class="li-icon" style="width:24px;height:24px"><span class="mono" style="font-size:8px;color:var(--blue)">dt</span></div><div class="li-main"><div class="t">time</div><div class="s">datetime · 0% 缺失</div></div><span class="pill">索引</span></div>
+                <div class="list-item" style="padding:7px 4px"><div class="li-icon" style="width:24px;height:24px"><span class="mono" style="font-size:8px;color:var(--violet)">cat</span></div><div class="li-main"><div class="t">station_id</div><div class="s">category · 0% 缺失 · 8.4k 唯一</div></div></div>
+                <div class="list-item" style="padding:7px 4px"><div class="li-icon" style="width:24px;height:24px"><span class="mono" style="font-size:8px;color:var(--cyan)">num</span></div><div class="li-main"><div class="t">latitude</div><div class="s">float64 · 0% 缺失</div></div></div>
+                <div class="list-item" style="padding:7px 4px"><div class="li-icon" style="width:24px;height:24px"><span class="mono" style="font-size:8px;color:var(--cyan)">num</span></div><div class="li-main"><div class="t">longitude</div><div class="s">float64 · 0% 缺失</div></div></div>
+                <div class="list-item" style="padding:7px 4px"><div class="li-icon" style="width:24px;height:24px"><span class="mono" style="font-size:8px;color:var(--cyan)">num</span></div><div class="li-main"><div class="t">temperature</div><div class="s">float32 · 4.2% 缺失</div></div><span class="pill amber">缺失</span></div>
+                <div class="list-item" style="padding:7px 4px"><div class="li-icon" style="width:24px;height:24px"><span class="mono" style="font-size:8px;color:var(--cyan)">num</span></div><div class="li-main"><div class="t">pressure</div><div class="s">float32 · 0.1% 缺失</div></div></div>
+                <div class="list-item" style="padding:7px 4px"><div class="li-icon" style="width:24px;height:24px"><span class="mono" style="font-size:8px;color:var(--cyan)">num</span></div><div class="li-main"><div class="t">wind_u</div><div class="s">float32 · 2.8% 缺失</div></div></div>
+                <div class="list-item" style="padding:7px 4px"><div class="li-icon" style="width:24px;height:24px"><span class="mono" style="font-size:8px;color:var(--violet)">cat</span></div><div class="li-main"><div class="t">quality</div><div class="s">category · 0% 缺失 · 4 唯一</div></div></div>
+                <div class="list-item" style="padding:7px 4px"><div class="li-icon" style="width:24px;height:24px"><span class="mono" style="font-size:8px;color:var(--amber)">pii</span></div><div class="li-main"><div class="t">contact_email</div><div class="s">text · 敏感字段 · 已脱敏</div></div><span class="pill amber">脱敏</span></div>
+              </div>
+              <div class="tiny muted mt10">显示 9 / 42 个字段</div>
+            </div>
+          </div>
+
+          <div class="grid" style="align-content:start">
+            <div class="card">
+              <div class="card-head"><h3>数据表</h3><div class="flex"><span class="sub">采样 12%</span><button class="btn small ghost">导出采样</button></div></div>
+              <div class="table-wrap" style="border:0;border-radius:0;max-height:300px">
+                <table>
+                  <thead><tr><th>time</th><th>station_id</th><th class="num">latitude</th><th class="num">longitude</th><th class="num">temperature</th><th class="num">pressure</th><th>quality</th></tr></thead>
+                  <tbody>
+                    <tr><td class="mono">2025-01-01 00:00</td><td>S-042</td><td class="num">39.9042</td><td class="num">116.4074</td><td class="num">-2.4</td><td class="num">1012.3</td><td><span class="pill green">A</span></td></tr>
+                    <tr><td class="mono">2025-01-01 00:00</td><td>S-043</td><td class="num">31.2304</td><td class="num">121.4737</td><td class="num">5.1</td><td class="num">1018.7</td><td><span class="pill green">A</span></td></tr>
+                    <tr><td class="mono">2025-01-01 01:00</td><td>S-042</td><td class="num">39.9042</td><td class="num">116.4074</td><td class="num">-2.8</td><td class="num">1012.1</td><td><span class="pill amber">B</span></td></tr>
+                    <tr><td class="mono">2025-01-01 01:00</td><td>S-043</td><td class="num">31.2304</td><td class="num">121.4737</td><td class="num">4.8</td><td class="num">1018.5</td><td><span class="pill green">A</span></td></tr>
+                    <tr><td class="mono">2025-01-01 02:00</td><td>S-042</td><td class="num">39.9042</td><td class="num">116.4074</td><td class="null">NULL</td><td class="num">1011.8</td><td><span class="pill red">缺测</span></td></tr>
+                    <tr><td class="mono">2025-01-01 02:00</td><td>S-043</td><td class="num">31.2304</td><td class="num">121.4737</td><td class="num">4.5</td><td class="num">1018.2</td><td><span class="pill green">A</span></td></tr>
+                    <tr><td class="mono">2025-01-01 03:00</td><td>S-042</td><td class="num">39.9042</td><td class="num">116.4074</td><td class="num">-3.1</td><td class="num">1011.6</td><td><span class="pill amber">B</span></td></tr>
+                    <tr><td class="mono">2025-01-01 03:00</td><td>S-043</td><td class="num">31.2304</td><td class="num">121.4737</td><td class="num">4.2</td><td class="num">1018.0</td><td><span class="pill green">A</span></td></tr>
+                    <tr><td class="mono">2025-01-01 04:00</td><td>S-042</td><td class="num">39.9042</td><td class="num">116.4074</td><td class="num">-2.9</td><td class="num">1011.9</td><td><span class="pill green">A</span></td></tr>
+                    <tr><td class="mono">2025-01-01 04:00</td><td>S-043</td><td class="num">31.2304</td><td class="num">121.4737</td><td class="null">NULL</td><td class="num">1018.1</td><td><span class="pill red">缺测</span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="grid g-2">
+              <div class="card"><div class="card-head"><h3>缺失率（Top 6）</h3><span class="sub">采样估算</span></div><div class="card-body">
+                <div class="bar-row"><span class="lbl">temperature</span><span class="track"><i style="width:42%"></i></span><span class="pct">4.2%</span></div>
+                <div class="bar-row"><span class="lbl">wind_u</span><span class="track"><i style="width:28%"></i></span><span class="pct">2.8%</span></div>
+                <div class="bar-row"><span class="lbl">wind_v</span><span class="track"><i style="width:22%"></i></span><span class="pct">2.2%</span></div>
+                <div class="bar-row"><span class="lbl">humidity</span><span class="track"><i style="width:14%"></i></span><span class="pct">1.4%</span></div>
+                <div class="bar-row"><span class="lbl">pressure</span><span class="track"><i style="width:6%"></i></span><span class="pct">0.1%</span></div>
+              </div></div>
+              <div class="card"><div class="card-head"><h3>相关性</h3><span class="sub">数值字段</span></div><div class="card-body">
+                <svg viewBox="0 0 220 120" style="width:100%">
+                  <g font-size="7" fill="#7386a3"><text x="2" y="14">temp</text><text x="2" y="40">press</text><text x="2" y="66">wind_u</text><text x="2" y="92">hum</text></g>
+                  <g>
+                    <rect x="42" y="6" width="38" height="20" fill="#35d0ba" opacity=".9"/><rect x="84" y="6" width="38" height="20" fill="#5aa9ff" opacity=".35"/><rect x="126" y="6" width="38" height="20" fill="#8b7cff" opacity=".2"/><rect x="168" y="6" width="38" height="20" fill="#5aa9ff" opacity=".3"/>
+                    <rect x="42" y="30" width="38" height="20" fill="#5aa9ff" opacity=".35"/><rect x="84" y="30" width="38" height="20" fill="#35d0ba" opacity=".9"/><rect x="126" y="30" width="38" height="20" fill="#f2b84b" opacity=".25"/><rect x="168" y="30" width="38" height="20" fill="#8b7cff" opacity=".2"/>
+                    <rect x="42" y="54" width="38" height="20" fill="#8b7cff" opacity=".2"/><rect x="84" y="54" width="38" height="20" fill="#f2b84b" opacity=".3"/><rect x="126" y="54" width="38" height="20" fill="#35d0ba" opacity=".9"/><rect x="168" y="54" width="38" height="20" fill="#ff6b6b" opacity=".28"/>
+                    <rect x="42" y="78" width="38" height="20" fill="#5aa9ff" opacity=".3"/><rect x="84" y="78" width="38" height="20" fill="#8b7cff" opacity=".2"/><rect x="126" y="78" width="38" height="20" fill="#ff6b6b" opacity=".3"/><rect x="168" y="78" width="38" height="20" fill="#35d0ba" opacity=".9"/>
+                  </g>
+                </svg>
+              </div></div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>温度分布</h3><div class="flex"><span class="sub">采样 12% · 1.2M 行</span><span class="pill cyan">直方图</span></div></div>
+              <div class="card-body">
+                <svg viewBox="0 0 620 150" style="width:100%;display:block">
+                  <g stroke="#1c2b45"><path d="M34 118h570M34 88h570M34 58h570M34 28h570"/></g>
+                  <g fill="#35d0ba">
+                    <rect x="44" y="104" width="40" height="14" opacity=".55"/>
+                    <rect x="90" y="92" width="40" height="26" opacity=".62"/>
+                    <rect x="136" y="72" width="40" height="46" opacity=".72"/>
+                    <rect x="182" y="44" width="40" height="74" opacity=".82"/>
+                    <rect x="228" y="26" width="40" height="92" opacity=".95"/>
+                    <rect x="274" y="34" width="40" height="84" opacity=".92"/>
+                    <rect x="320" y="52" width="40" height="66" opacity=".8"/>
+                    <rect x="366" y="70" width="40" height="48" opacity=".7"/>
+                    <rect x="412" y="88" width="40" height="30" opacity=".6"/>
+                    <rect x="458" y="98" width="40" height="20" opacity=".52"/>
+                    <rect x="504" y="106" width="40" height="12" opacity=".45"/>
+                  </g>
+                  <path d="M44 110 C110 100 140 56 200 44 S300 30 350 52 470 96 544 108" fill="none" stroke="#8b7cff" stroke-width="1.5" opacity=".8"/>
+                  <g fill="#7386a3" font-size="9" font-family="Cascadia Code, monospace">
+                    <text x="30" y="134">-40</text><text x="200" y="134">-15</text><text x="360" y="134">10</text><text x="520" y="134">35</text>
+                    <text x="6" y="32">频数</text>
+                  </g>
+                  <g fill="#7386a3" font-size="9" font-family="Cascadia Code, monospace"><text x="512" y="24">°C</text></g>
+                </svg>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid" style="align-content:start">
+            <div class="card">
+              <div class="card-head"><h3>质量报告</h3><span class="pill green">86 / 100</span></div>
+              <div class="card-body">
+                <div class="flex" style="gap:14px">
+                  <div class="score-ring">
+                    <svg width="92" height="92"><circle cx="46" cy="46" r="38" fill="none" stroke="#172640" stroke-width="8"/><circle cx="46" cy="46" r="38" fill="none" stroke="#35d0ba" stroke-width="8" stroke-linecap="round" stroke-dasharray="238.8" stroke-dashoffset="33.4"/></svg>
+                    <div class="val"><b>86</b><span>良好</span></div>
+                  </div>
+                  <div class="small muted" style="line-height:1.7">3 个警告<br>1 个阻断<br>2 个敏感字段<br><span class="pill amber" style="margin-top:5px">需确认后继续</span></div>
+                </div>
+                <div class="sep"></div>
+                <div class="issue"><span class="sev high"></span><div class="body"><div class="t">temperature 存在 4.2% 缺失</div><div class="s">集中在 2025-01 与高纬度站点；建议前向填充或标记</div></div><span class="go">修复</span></div>
+                <div class="issue"><span class="sev mid"></span><div class="body"><div class="t">wind_u 存在 2.8% 缺失</div><div class="s">建议按站点线性插值；报告将标注</div></div><span class="go">修复</span></div>
+                <div class="issue"><span class="sev mid"></span><div class="body"><div class="t">pressure 单位不一致</div><div class="s">hPa 与 Pa 混用；建议统一为 hPa</div></div><span class="go">修复</span></div>
+                <div class="issue"><span class="sev low"></span><div class="body"><div class="t">contact_email 将被脱敏</div><div class="s">默认不发送原始值给模型</div></div><span class="go">查看</span></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>将发送给 AI 的上下文</h3><span class="pill cyan">最小化</span></div>
+              <div class="card-body">
+                <div class="kv">
+                  <span class="k">字段数</span><span class="v">42（含类型与统计量）</span>
+                  <span class="k">样本</span><span class="v">100 行 / 1MB 上限</span>
+                  <span class="k">脱敏</span><span class="v">2 个字段</span>
+                  <span class="k">全量数据</span><span class="v">不发送</span>
+                </div>
+                <div class="sep"></div>
+                <button class="btn small ghost" style="width:100%">预览外发内容</button>
+                <button class="btn primary mt8" style="width:100%" data-jump="p04">开始 AI 分析</button>
+                <div class="tiny muted mt8" style="text-align:center">预计 8–12 分钟 · 预算 $0.42</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="footer-note"><span>原始文件：data/climate/global_temp_2025.nc · SHA-256 9f2c…a71e</span><span class="mono">read-only reference</span></div>
+      </section>
+
+      <!-- P04 -->
+      <section class="page" id="page-p04">
+        <div class="page-head">
+          <div>
+            <div class="eyebrow">AI PIPELINE / ORCHESTRATION</div>
+            <h2>AI 管线运行</h2>
+            <p>全球气温异常场 · 默认全自动 · 已运行 02:14 · 当前步骤：图表选型</p>
+          </div>
+          <div class="head-actions">
+            <span class="pill violet"><i class="dot-s"></i>运行中</span>
+            <span class="pill">Token 18.4k</span>
+            <span class="pill">估算 $0.38 / $2.00</span>
+            <button class="btn ghost" id="pauseBtn">暂停</button>
+            <button class="btn danger" id="cancelBtn">取消</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="steps">
+            <div class="step done"><span class="num">1</span><span class="txt">提取</span></div>
+            <div class="step done"><span class="num">2</span><span class="txt">画像</span></div>
+            <div class="step done"><span class="num">3</span><span class="txt">清洗</span></div>
+            <div class="step done"><span class="num">4</span><span class="txt">分析</span></div>
+            <div class="step active"><span class="num">5</span><span class="txt">选图</span></div>
+            <div class="step"><span class="num">6</span><span class="txt">渲染</span></div>
+            <div class="step"><span class="num">7</span><span class="txt">报告</span></div>
+          </div>
+          <div class="card-body">
+            <div class="grid split-2-1">
+              <div>
+                <div class="flex between" style="margin-bottom:8px"><span class="small">实时事件</span><div class="flex"><span class="pill green"><i class="dot-s"></i>SSE 已连接</span><span class="pill">自动滚动</span></div></div>
+                <div class="log" id="logBox">
+                  <div class="ln"><span class="ts">10:31:02.104</span><span class="lv i">INFO</span><span class="msg">pipeline.start project=<span class="hl">global-temp-2025</span> dataset=ds_01 rows=1,204,882</span></div>
+                  <div class="ln"><span class="ts">10:31:02.311</span><span class="lv ok"> OK </span><span class="msg">extract.done format=netcdf variables=14 coords=3 size=812MB</span></div>
+                  <div class="ln"><span class="ts">10:31:08.902</span><span class="lv i">INFO</span><span class="msg">profile.done missing=4.2% outliers=0.7% sensitive=2 sampled=12%</span></div>
+                  <div class="ln"><span class="ts">10:31:09.115</span><span class="lv w">WARN</span><span class="msg">unit.mismatch field=pressure found=[hPa,Pa] action=normalize_to_hPa</span></div>
+                  <div class="ln"><span class="ts">10:31:14.660</span><span class="lv ok"> OK </span><span class="msg">clean.done steps=6 changed_rows=58,204 recipe=r_07</span></div>
+                  <div class="ln"><span class="ts">10:31:15.002</span><span class="lv i">INFO</span><span class="msg">context.build fields=42 sample_rows=100 redacted=2 bytes=184,320</span></div>
+                  <div class="ln"><span class="ts">10:31:15.221</span><span class="lv i">INFO</span><span class="msg">provider.call primary=openai-compat model=gpt-4.1 stream=true</span></div>
+                  <div class="ln"><span class="ts">10:31:22.804</span><span class="lv ok"> OK </span><span class="msg">analysis.done trends=3 correlations=5 suggested_families=[3d_surface,volume,map]</span></div>
+                  <div class="ln"><span class="ts">10:31:22.990</span><span class="lv i">INFO</span><span class="msg">select.candidates count=7 filtered=4 reason=field_types+size</span></div>
+                  <div class="ln"><span class="ts">10:31:28.440</span><span class="lv w">WARN</span><span class="msg">select.low_confidence top1=0.74 top2=0.71 gap=0.03 threshold=0.08</span></div>
+                  <div class="ln"><span class="ts">10:31:28.611</span><span class="lv i">INFO</span><span class="msg">select.reselect attempt=1 max=2 reason=score_below_threshold</span></div>
+                  <div class="ln"><span class="ts">10:31:34.180</span><span class="lv ok"> OK </span><span class="msg">select.done chart=<span class="hl">volume_temperature</span> score=0.86 backend=mayavi</span></div>
+                  <div class="ln"><span class="ts">10:31:34.402</span><span class="lv i">INFO</span><span class="msg">render.queue backend=mayavi priority=normal worker=2</span></div>
+                  <div class="ln"><span class="ts">10:31:35.011</span><span class="lv i">INFO</span><span class="msg">cost.update input=15,204 output=3,196 est=$0.38 budget_remaining=$1.62</span></div>
+                </div>
+                <div class="chat">
+                  <input class="input" id="chatInput" placeholder="用自然语言修正，例如：改用等值面，不要体渲染…">
+                  <button class="btn primary" id="chatSend">发送</button>
+                </div>
+                <div class="tiny muted mt8">对话修正会记录到追溯；高风险操作将二次确认。</div>
+                <div class="grid g-3 mt14">
+                  <div style="border:1px solid var(--line);border-radius:8px;padding:9px 10px;background:rgba(18,30,51,.45)">
+                    <div class="tiny muted">清洗变更</div>
+                    <div style="font-size:15px;font-weight:650;margin-top:2px">58,204 行</div>
+                    <div class="tiny muted">6 步 · 可单步撤销</div>
+                  </div>
+                  <div style="border:1px solid var(--line);border-radius:8px;padding:9px 10px;background:rgba(18,30,51,.45)">
+                    <div class="tiny muted">候选筛选</div>
+                    <div style="font-size:15px;font-weight:650;margin-top:2px">7 → 4</div>
+                    <div class="tiny muted">规则硬筛 · 注册表内</div>
+                  </div>
+                  <div style="border:1px solid var(--line);border-radius:8px;padding:9px 10px;background:rgba(18,30,51,.45)">
+                    <div class="tiny muted">预计剩余</div>
+                    <div style="font-size:15px;font-weight:650;margin-top:2px">01:58</div>
+                    <div class="tiny muted">渲染 + 报告</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="grid" style="align-content:start">
+                <div class="card" style="background:rgba(10,19,34,.55)">
+                  <div class="card-head"><h3>当前步骤</h3><span class="pill violet">选图</span></div>
+                  <div class="card-body">
+                    <div class="kv">
+                      <span class="k">步骤</span><span class="v">select_chart</span>
+                      <span class="k">Provider</span><span class="v">OpenAI 兼容 · gpt-4.1</span>
+                      <span class="k">耗时</span><span class="v mono">11.2s</span>
+                      <span class="k">Token</span><span class="v mono">2,940 / 612</span>
+                      <span class="k">重选</span><span class="v">1 / 2</span>
+                      <span class="k">置信度</span><span class="v">0.86</span>
+                    </div>
+                    <div class="sep"></div>
+                    <div class="small">候选与评分</div>
+                    <div class="bar-row mt8"><span class="lbl">体渲染</span><span class="track"><i style="width:86%"></i></span><span class="pct">0.86</span></div>
+                    <div class="bar-row"><span class="lbl">等值面</span><span class="track"><i style="width:74%"></i></span><span class="pct">0.74</span></div>
+                    <div class="bar-row"><span class="lbl">切片</span><span class="track"><i style="width:71%"></i></span><span class="pct">0.71</span></div>
+                    <button class="btn small ghost mt10" style="width:100%" data-modal="top3">查看 Top3 与理由</button>
+                  </div>
+                </div>
+                <div class="card" style="background:rgba(10,19,34,.55)">
+                  <div class="card-head"><h3>降级与预算</h3><span class="pill green">正常</span></div>
+                  <div class="card-body">
+                    <div class="status-row"><span class="lbl">主 Provider</span><span class="val"><i class="dot"></i>可用 · 1.8s</span></div>
+                    <div class="status-row"><span class="lbl">备用 Provider</span><span class="val">未触发</span></div>
+                    <div class="status-row"><span class="lbl">预算</span><span class="val"><span class="meter"><i style="width:19%"></i></span>$0.38 / $2.00</span></div>
+                    <div class="status-row"><span class="lbl">并发</span><span class="val">1 / 2</span></div>
+                    <div class="sep"></div>
+                    <button class="btn small ghost" style="width:100%" data-jump="p09">查看完整追溯</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="footer-note"><span>任务 task_01J8V3 · 启动于 2026-10-22 10:31:02 · 本地处理</span><span class="mono">2 workers · queue 1</span></div>
+      </section>
+
+      <!-- P05 -->
+      <section class="page" id="page-p05">
+        <div class="page-head">
+          <div>
+            <div class="eyebrow">VISUALIZATION / 2D WORKBENCH</div>
+            <h2>2D 图表工作台</h2>
+            <p>销售趋势 · 自动选型：折线图（时间 × 数值）· 评分 0.91 · 数据聚合：按日求和</p>
+          </div>
+          <div class="head-actions">
+            <div class="tabs" style="background:transparent;border:0;padding:0">
+              <button class="tab active">销售趋势</button>
+              <button class="tab">区域对比</button>
+              <button class="tab">相关性</button>
+              <button class="tab">+</button>
+            </div>
+            <button class="btn ghost" data-modal="top3">Top3 候选</button>
+            <button class="btn primary" data-jump="p07">生成报告</button>
+          </div>
+        </div>
+
+        <div class="grid split-3b">
+          <div class="card" style="align-self:start">
+            <div class="card-head"><h3>字段</h3><span class="sub">sales_q3.csv</span></div>
+            <div class="card-body" style="padding:11px">
+              <div class="tiny muted">维度</div>
+              <div class="list-item" style="padding:6px 4px"><span class="pill blue">date</span><span class="small">日期</span></div>
+              <div class="list-item" style="padding:6px 4px"><span class="pill violet">region</span><span class="small">区域</span></div>
+              <div class="list-item" style="padding:6px 4px"><span class="pill violet">category</span><span class="small">品类</span></div>
+              <div class="sep"></div>
+              <div class="tiny muted">度量</div>
+              <div class="list-item" style="padding:6px 4px"><span class="pill cyan">revenue</span><span class="small">销售额</span></div>
+              <div class="list-item" style="padding:6px 4px"><span class="pill cyan">orders</span><span class="small">订单数</span></div>
+              <div class="list-item" style="padding:6px 4px"><span class="pill cyan">aov</span><span class="small">客单价</span></div>
+              <div class="sep"></div>
+              <div class="field"><label>筛选</label><select class="select"><option>全部区域</option><option>华东</option><option>华南</option></select></div>
+              <div class="field mt8"><label>聚合</label><select class="select"><option>按日求和</option><option>按周求和</option><option>按月均值</option></select></div>
+              <div class="sep"></div>
+              <button class="btn small ghost" style="width:100%">添加计算字段</button>
+            </div>
+          </div>
+
+          <div class="card chart-card">
+            <div class="chart-toolbar">
+              <span class="pill cyan">折线图</span>
+              <span class="pill">时间序列</span>
+              <span class="pill">双轴</span>
+              <div class="sp"></div>
+              <button class="btn small ghost">撤销</button>
+              <button class="btn small ghost">重做</button>
+              <button class="btn small ghost">代码</button>
+              <button class="btn small">导出</button>
+            </div>
+            <div class="chart-area">
+              <svg viewBox="0 0 760 360" style="width:100%;height:auto;display:block">
+                <defs>
+                  <linearGradient id="area1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#35d0ba" stop-opacity=".26"/><stop offset="1" stop-color="#35d0ba" stop-opacity="0"/></linearGradient>
+                  <linearGradient id="area2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8b7cff" stop-opacity=".2"/><stop offset="1" stop-color="#8b7cff" stop-opacity="0"/></linearGradient>
+                </defs>
+                <g stroke="#1c2b45" stroke-width="1">
+                  <path d="M56 36h680M56 100h680M56 164h680M56 228h680M56 292h680"/>
+                  <path d="M56 36v256M192 36v256M328 36v256M464 36v256M600 36v256M736 36v256"/>
+                </g>
+                <g fill="#7386a3" font-size="10" font-family="Cascadia Code, monospace">
+                  <text x="14" y="40">400k</text><text x="14" y="104">300k</text><text x="14" y="168">200k</text><text x="14" y="232">100k</text><text x="20" y="296">0</text>
+                  <text x="56" y="316">07-01</text><text x="192" y="316">07-15</text><text x="328" y="316">08-01</text><text x="464" y="316">08-15</text><text x="600" y="316">09-01</text><text x="716" y="316">09-15</text>
+                </g>
+                <path d="M56 250 C90 238 110 212 150 220 S210 246 250 214 300 168 340 182 390 214 430 176 480 122 520 140 570 176 610 132 660 96 700 112 736 86 L736 292 L56 292Z" fill="url(#area1)"/>
+                <path d="M56 250 C90 238 110 212 150 220 S210 246 250 214 300 168 340 182 390 214 430 176 480 122 520 140 570 176 610 132 660 96 700 112 736 86" fill="none" stroke="#35d0ba" stroke-width="2.2" stroke-linecap="round"/>
+                <path d="M56 272 C95 268 120 256 160 260 S220 272 260 252 310 226 350 234 400 250 440 226 490 196 530 206 580 222 620 194 670 172 710 180 736 164" fill="none" stroke="#8b7cff" stroke-width="1.7" stroke-dasharray="5 4" opacity=".9"/>
+                <g fill="#35d0ba"><circle cx="56" cy="250" r="2.6"/><circle cx="150" cy="220" r="2.6"/><circle cx="250" cy="214" r="2.6"/><circle cx="340" cy="182" r="2.6"/><circle cx="430" cy="176" r="2.6"/><circle cx="520" cy="140" r="2.6"/><circle cx="610" cy="132" r="2.6"/><circle cx="700" cy="112" r="2.6"/><circle cx="736" cy="86" r="3" fill="#dffaf5"/></g>
+                <g>
+                  <rect x="500" y="52" width="146" height="34" rx="6" fill="#0d1a2e" stroke="#2a3d5c"/>
+                  <text x="510" y="66" fill="#e6edf7" font-size="9.5">09-12 峰值</text>
+                  <text x="510" y="79" fill="#8fa3bf" font-size="9">revenue 386,420 · +18.4%</text>
+                </g>
+                <line x1="56" y1="292" x2="736" y2="292" stroke="#2a3d5c"/>
+                <text x="372" y="338" fill="#7386a3" font-size="10">日期 date</text>
+                <text x="8" y="24" fill="#7386a3" font-size="9">USD</text>
+              </svg>
+            </div>
+            <div class="chart-legend">
+              <span class="k"><i class="sw" style="background:#35d0ba"></i>销售额 revenue</span>
+              <span class="k"><i class="sw" style="background:#8b7cff"></i>订单数 orders（右轴）</span>
+              <span class="k muted">数据：2025-07-01 → 2025-09-30 · 92 天</span>
+              <span class="right pill cyan">自动选型 0.91</span>
+            </div>
+            <div style="border-top:1px solid var(--line);padding:9px 12px" class="flex small muted">
+              <span>悬停查看数值</span><span>·</span><span>框选缩放</span><span>·</span><span>图例筛选</span>
+              <span class="right mono">Plotly.js</span>
+            </div>
+            <div style="border-top:1px solid var(--line);padding:12px">
+              <div class="flex between" style="margin-bottom:7px"><span class="small">数据明细</span><span class="tiny muted">按日聚合 · 前 4 行</span></div>
+              <div class="table-wrap" style="max-height:158px">
+                <table>
+                  <thead><tr><th>date</th><th>region</th><th class="num">revenue</th><th class="num">orders</th><th class="num">aov</th><th class="num">WoW</th></tr></thead>
+                  <tbody>
+                    <tr><td class="mono">2025-09-12</td><td>华南</td><td class="num">62,340</td><td class="num">1,462</td><td class="num">42.6</td><td class="num up">+18.4%</td></tr>
+                    <tr><td class="mono">2025-09-13</td><td>华北</td><td class="num">44,902</td><td class="num">1,110</td><td class="num">40.5</td><td class="num down">-2.1%</td></tr>
+                    <tr><td class="mono">2025-09-14</td><td>西南</td><td class="num">39,118</td><td class="num">982</td><td class="num">39.8</td><td class="num down">-4.8%</td></tr>
+                    <tr><td class="mono">2025-09-15</td><td>华东</td><td class="num">53,206</td><td class="num">1,301</td><td class="num">40.9</td><td class="num up">+3.4%</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="sep"></div>
+              <div class="flex between" style="margin-bottom:7px"><span class="small">分析结论</span><span class="pill cyan">AI · 待复核</span></div>
+              <div class="tiny muted" style="line-height:1.75">
+                <div class="flex" style="align-items:flex-start;gap:7px;margin-bottom:6px"><span class="pill green">01</span><span>09-12 出现峰值，销售额 62,340，环比 +18.4%，主要由华南拉动。</span></div>
+                <div class="flex" style="align-items:flex-start;gap:7px;margin-bottom:6px"><span class="pill green">02</span><span>订单数与销售额同向，相关系数 0.87；增长主要来自订单量。</span></div>
+                <div class="flex" style="align-items:flex-start;gap:7px"><span class="pill green">03</span><span>区域分化：华东稳定，西南连续两周下滑，建议下钻品类。</span></div>
+              </div>
+              <div class="flex mt10"><button class="btn small ghost" data-jump="p07">加入报告</button><button class="btn small ghost">查看代码</button><button class="btn small ghost">导出图表</button></div>
+            </div>
+          </div>
+
+          <div class="grid" style="align-content:start">
+            <div class="card">
+              <div class="card-head"><h3>图表配置</h3><span class="pill cyan">折线图</span></div>
+              <div class="card-body">
+                <div class="field"><label>X 轴</label><select class="select"><option>date（时间）</option></select></div>
+                <div class="field mt8"><label>Y 轴</label><select class="select"><option>revenue（求和）</option></select></div>
+                <div class="field mt8"><label>右轴</label><select class="select"><option>orders（求和）</option></select></div>
+                <div class="form-grid mt8">
+                  <div class="field"><label>排序</label><select class="select"><option>时间升序</option></select></div>
+                  <div class="field"><label>缺失</label><select class="select"><option>断开</option></select></div>
+                </div>
+                <div class="sep"></div>
+                <div class="flex between"><span class="small">显示网格</span><span class="switch on"></span></div>
+                <div class="flex between mt8"><span class="small">显示图例</span><span class="switch on"></span></div>
+                <div class="flex between mt8"><span class="small">平滑曲线</span><span class="switch"></span></div>
+                <div class="flex between mt8"><span class="small">色盲友好色板</span><span class="switch on"></span></div>
+                <div class="sep"></div>
+                <div class="field"><label>标题</label><input class="input" value="Q3 销售额与订单趋势"></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>选型评分</h3><span class="pill green">0.91</span></div>
+              <div class="card-body">
+                <div class="bar-row"><span class="lbl">适配性</span><span class="track"><i style="width:94%"></i></span><span class="pct">0.94</span></div>
+                <div class="bar-row"><span class="lbl">可读性</span><span class="track"><i style="width:92%"></i></span><span class="pct">0.92</span></div>
+                <div class="bar-row"><span class="lbl">信息密度</span><span class="track"><i style="width:88%"></i></span><span class="pct">0.88</span></div>
+                <div class="bar-row"><span class="lbl">性能</span><span class="track"><i style="width:90%"></i></span><span class="pct">0.90</span></div>
+                <div class="sep"></div>
+                <div class="tiny muted" style="line-height:1.65">理由：时间为连续维度、revenue 为数值度量，折线图能保留趋势与季节性；双轴展示订单数，避免量纲差异。</div>
+                <button class="btn small ghost mt10" style="width:100%" data-modal="top3">查看候选与理由</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="grid g-2 mt14">
+          <div class="card">
+            <div class="card-head"><h3>图表说明</h3><div class="flex"><span class="pill green">已记录到 manifest</span><span class="sub">Plotly.js</span></div></div>
+            <div class="card-body">
+              <div class="grid g-2">
+                <div class="kv">
+                  <span class="k">数据源</span><span class="v">sales_q3.csv · 92 天</span>
+                  <span class="k">聚合</span><span class="v">按日求和</span>
+                  <span class="k">排除</span><span class="v">退款订单 1,204 行</span>
+                  <span class="k">缺失</span><span class="v">1.2% · 折线断开</span>
+                  <span class="k">坐标</span><span class="v">左轴 USD · 右轴 单</span>
+                </div>
+                <div class="kv">
+                  <span class="k">选型</span><span class="v">line_timeseries · 0.91</span>
+                  <span class="k">颜色</span><span class="v">色盲友好 · 已校验</span>
+                  <span class="k">渲染</span><span class="v">Plotly 2.35 · SVG</span>
+                  <span class="k">版本</span><span class="v mono">chart_07@v3</span>
+                  <span class="k">导出</span><span class="v">PNG · SVG · PDF · HTML</span>
+                </div>
+              </div>
+              <div class="sep"></div>
+              <div class="tiny muted">科学说明：折线连接的是按日聚合值，不代表日内连续变化；双轴图仅用于展示量纲差异，比较趋势时请分别读数。</div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>可复现导出</h3><div class="flex"><span class="pill">Python / Notebook</span><span class="sub">依赖已锁定</span></div></div>
+            <div class="card-body">
+              <div class="code" style="max-height:150px"><span class="kw">import</span> plotly.express <span class="kw">as</span> px
+df = <span class="fn">read_sales</span>(<span class="st">"sales_q3.csv"</span>)
+fig = px.<span class="fn">line</span>(df, x=<span class="st">"date"</span>, y=<span class="st">"revenue"</span>,
+             color=<span class="st">"region"</span>, template=<span class="st">"advp_dark"</span>)
+fig.<span class="fn">write_html</span>(<span class="st">"chart_07.html"</span>)</div>
+              <div class="flex mt10"><button class="btn small ghost">复制代码</button><button class="btn small ghost">下载 Notebook</button><button class="btn small primary" data-jump="p07">加入报告</button></div>
+            </div>
+          </div>
+        </div>
+        <div class="footer-note"><span>图表 chart_07 · 配置已保存 · 可导出 PNG/SVG/PDF/HTML/代码</span><span class="mono">render: plotly 2.35</span></div>
+      </section>
+
+      <!-- P06 -->
+      <section class="page" id="page-p06">
+        <div class="page-head">
+          <div>
+            <div class="eyebrow">SCIENTIFIC VISUALIZATION / 3D</div>
+            <h2>3D 科学视图</h2>
+            <p>global_temp_2025.nc · 体渲染（temperature）· 后端：Mayavi · 1.2GB · LOD 2x</p>
+          </div>
+          <div class="head-actions">
+            <span class="pill violet">Mayavi · 服务端</span>
+            <span class="pill amber" id="gpuBadge">集显降级</span>
+            <button class="btn ghost" id="backendBtn">切换后端</button>
+            <button class="btn primary" id="animBtn">导出动画</button>
+          </div>
+        </div>
+
+        <div class="grid split-3">
+          <div class="grid" style="align-content:start">
+            <div class="card">
+              <div class="card-head"><h3>场景</h3><span class="sub">Scene JSON</span></div>
+              <div class="card-body">
+                <div class="field"><label>数据源</label><select class="select"><option>global_temp_2025.nc</option></select></div>
+                <div class="field mt8"><label>几何类型</label><select class="select"><option>体渲染 Volume</option><option>等值面 Isosurface</option><option>切片 Slice</option><option>流线 Streamlines</option></select></div>
+                <div class="field mt8"><label>渲染后端</label><select class="select" id="backendSelect"><option>自动（推荐）</option><option selected>Mayavi / VTK</option><option>WebGL / VTK.js</option><option>trame 交互</option></select></div>
+                <div class="field mt8"><label>标量字段</label><select class="select"><option>temperature</option><option>pressure</option><option>wind_speed</option></select></div>
+                <div class="sep"></div>
+                <div class="flex between"><span class="small">LOD 降采样</span><span class="pill">2× (128³)</span></div>
+                <input type="range" min="1" max="4" value="2" style="width:100%;accent-color:var(--cyan);margin-top:8px">
+                <div class="flex between mt10"><span class="small">裁剪平面</span><span class="switch on"></span></div>
+                <div class="flex between mt8"><span class="small">显示坐标轴</span><span class="switch on"></span></div>
+                <div class="flex between mt8"><span class="small">光照</span><span class="switch on"></span></div>
+                <div class="sep"></div>
+                <button class="btn small ghost" style="width:100%">保存 Scene JSON</button>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>性能</h3><span class="pill green">稳定</span></div>
+              <div class="card-body">
+                <div class="kv">
+                  <span class="k">后端</span><span class="v">Mayavi 4.8 / VTK 9.3</span>
+                  <span class="k">帧率</span><span class="v mono">24 fps</span>
+                  <span class="k">显存</span><span class="v mono">1.1 / 2.0 GB</span>
+                  <span class="k">降采样</span><span class="v">2× · 已在报告标注</span>
+                  <span class="k">首帧</span><span class="v mono">8.4s</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="overflow:hidden">
+            <div class="viewport">
+              <div class="grid-floor"></div>
+              <svg class="vol-box" viewBox="0 0 700 620" preserveAspectRatio="none">
+                <g fill="none" stroke="#5aa9ff" stroke-opacity=".38" stroke-width="1.2">
+                  <path d="M150 180 470 120 610 260 610 500 290 560 150 420Z"/>
+                  <path d="M150 180 290 320 610 260M290 320v240M290 320 470 120"/>
+                  <path d="M150 420h440M290 560V320" stroke-dasharray="2 5" stroke-opacity=".22"/>
+                </g>
+                <g fill="none" stroke="#35d0ba" stroke-opacity=".42" stroke-width="1.1" stroke-dasharray="3 7">
+                  <ellipse cx="375" cy="330" rx="138" ry="52"/>
+                  <ellipse cx="375" cy="330" rx="96" ry="34"/>
+                  <ellipse cx="375" cy="330" rx="54" ry="20"/>
+                  <path d="M237 330h276M375 278v104"/>
+                </g>
+                <g stroke="#8b7cff" stroke-opacity=".7" stroke-width="1.5" fill="none">
+                  <path d="M402 430v-66"/><path d="m394 372 8-10 8 10"/>
+                </g>
+                <g font-family="Cascadia Code, monospace" font-size="10" fill="#9fb0c8">
+                  <text x="618" y="262">lon</text><text x="616" y="518">lat</text><text x="302" y="112">level</text>
+                </g>
+              </svg>
+              <div class="axis-note"><b>X</b> lon · <b>Y</b> lat · <b>Z</b> level · grid 2.5°</div>
+              <div style="position:absolute;left:16px;bottom:84px;z-index:2;width:52px;height:52px;opacity:.9">
+                <svg viewBox="0 0 60 60" fill="none">
+                  <circle cx="30" cy="30" r="2.4" fill="#dffaf5"/>
+                  <path d="M30 30 52 38" stroke="#35d0ba" stroke-width="1.3"/><path d="m49 33 4 5-6 1" stroke="#35d0ba" stroke-width="1.3"/>
+                  <path d="M30 30 12 42" stroke="#8b7cff" stroke-width="1.3"/><path d="m14 37-2 6 6-1" stroke="#8b7cff" stroke-width="1.3"/>
+                  <path d="M30 30V10" stroke="#5aa9ff" stroke-width="1.3"/><path d="m26 14 4-5 4 5" stroke="#5aa9ff" stroke-width="1.3"/>
+                  <g font-family="Cascadia Code, monospace" font-size="8" fill="#9fb0c8"><text x="51" y="32">X</text><text x="9" y="49">Y</text><text x="34" y="10">Z</text></g>
+                </svg>
+              </div>
+              <div class="volume"><span class="ring"></span><span class="ring"></span><span class="ring"></span></div>
+              <div class="hud">
+                <span class="pill violet">volume · temperature</span>
+                <span class="pill">128 × 128 × 64</span>
+                <span class="pill amber">LOD 2×</span>
+              </div>
+              <div class="hud-r">
+                <span class="pill green">24 fps</span>
+                <span class="pill">1.1 GB</span>
+              </div>
+              <div class="colorbar"><span style="top:0">40°C</span><span style="top:50%">0°C</span><span style="bottom:0">-40°C</span></div>
+              <div class="cam">
+                <svg width="30" height="30" viewBox="0 0 40 40" fill="none"><path d="M20 6v28M7 13l13-7 13 7" stroke="#8fa3bf" stroke-width="1.2"/><path d="M20 34 8 27M20 34l12-7" stroke="#35d0ba" stroke-width="1.2"/><path d="m20 20 9 5" stroke="#8b7cff" stroke-width="1.2"/></svg>
+              </div>
+              <div class="timeline">
+                <span class="mono">t=0.38</span>
+                <span class="track"><i></i><b></b></span>
+                <span>2025-01 → 2025-12</span>
+                <span class="pill">30 fps</span>
+              </div>
+            </div>
+            <div class="flex between" style="padding:9px 12px;border-top:1px solid var(--line)">
+              <div class="flex small muted"><span>拖拽旋转</span><span>·</span><span>滚轮缩放</span><span>·</span><span>右键平移</span><span>·</span><span>点击探针</span></div>
+              <div class="flex"><button class="btn small ghost">重置视角</button><button class="btn small">截图</button></div>
+            </div>
+          </div>
+
+          <div class="grid" style="align-content:start">
+            <div class="card">
+              <div class="card-head"><h3>传输函数</h3><span class="pill">temperature</span></div>
+              <div class="card-body">
+                <div class="tf-editor">
+                  <svg viewBox="0 0 260 110" preserveAspectRatio="none">
+                    <g stroke="#1c2b45"><path d="M0 28h260M0 55h260M0 82h260"/></g>
+                    <path d="M0 102 C30 100 48 76 70 70 S110 66 130 48 160 30 180 26 220 22 260 18" fill="none" stroke="#35d0ba" stroke-width="2"/>
+                    <path d="M0 102 C30 100 48 76 70 70 S110 66 130 48 160 30 180 26 220 22 260 18 L260 110 L0 110Z" fill="#35d0ba" opacity=".08"/>
+                    <circle cx="70" cy="70" r="4" fill="#0b1423" stroke="#35d0ba" stroke-width="2"/><circle cx="130" cy="48" r="4" fill="#0b1423" stroke="#35d0ba" stroke-width="2"/><circle cx="180" cy="26" r="4" fill="#0b1423" stroke="#35d0ba" stroke-width="2"/>
+                  </svg>
+                  <div class="grad"></div>
+                </div>
+                <div class="flex between mt8 tiny muted"><span>-40°C</span><span>0°C</span><span>40°C</span></div>
+                <div class="sep"></div>
+                <div class="field"><label>色标</label><select class="select"><option>CoolWarm（科学）</option><option>Viridis</option><option>Magma</option><option>自定义</option></select></div>
+                <div class="form-grid mt8">
+                  <div class="field"><label>范围下限</label><input class="input" value="-40"></div>
+                  <div class="field"><label>范围上限</label><input class="input" value="40"></div>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>标注与裁剪</h3><span class="pill">3 项</span></div>
+              <div class="card-body">
+                <div class="flex between"><span class="small">X 裁剪</span><span class="mono tiny">0.12 – 0.88</span></div>
+                <input type="range" value="12" style="width:100%;accent-color:var(--violet);margin:6px 0 10px">
+                <div class="flex between"><span class="small">Y 裁剪</span><span class="mono tiny">0.00 – 1.00</span></div>
+                <input type="range" value="0" style="width:100%;accent-color:var(--violet);margin:6px 0 10px">
+                <div class="flex between"><span class="small">Z 裁剪</span><span class="mono tiny">0.00 – 1.00</span></div>
+                <input type="range" value="0" style="width:100%;accent-color:var(--violet);margin:6px 0 10px">
+                <div class="sep"></div>
+                <div class="issue" style="margin-bottom:0"><span class="sev mid"></span><div class="body"><div class="t">集显环境已自动降采样</div><div class="s">导出与报告将标注“基于 LOD 2×”</div></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="footer-note"><span>Scene JSON v1.0 · cache hit 0% · 渲染 worker 2</span><span class="mono">mayavi offscreen / vtk 9.3</span></div>
+      </section>
+
+      <!-- P07 -->
+      <section class="page" id="page-p07">
+        <div class="page-head">
+          <div>
+            <div class="eyebrow">REPORT / EXPORT</div>
+            <h2>报告与导出</h2>
+            <p>全球气温异常场 · 6 图 · 中文报告 · 可复现包 · 导出前自动检查敏感信息</p>
+          </div>
+          <div class="head-actions">
+            <span class="pill green"><i class="dot-s"></i>检查通过</span>
+            <button class="btn ghost" id="previewManifest">查看 manifest</button>
+            <button class="btn primary" id="exportBtn">导出 PDF</button>
+          </div>
+        </div>
+
+        <div class="grid split-3b">
+          <div class="card" style="align-self:start">
+            <div class="card-head"><h3>报告大纲</h3><span class="sub">拖拽排序</span></div>
+            <div class="card-body" style="padding:10px">
+              <div class="list">
+                <div class="list-item" style="padding:7px 5px"><span class="mono tiny muted">01</span><div class="li-main"><div class="t">摘要</div><div class="s">自动生成 · 可编辑</div></div><span class="pill green">已选</span></div>
+                <div class="list-item" style="padding:7px 5px"><span class="mono tiny muted">02</span><div class="li-main"><div class="t">数据质量</div><div class="s">3 警告 · 1 阻断</div></div><span class="pill green">已选</span></div>
+                <div class="list-item" style="padding:7px 5px"><span class="mono tiny muted">03</span><div class="li-main"><div class="t">气温趋势</div><div class="s">折线图 · 双轴</div></div><span class="pill green">已选</span></div>
+                <div class="list-item" style="padding:7px 5px"><span class="mono tiny muted">04</span><div class="li-main"><div class="t">区域对比</div><div class="s">条形图 · 排序</div></div><span class="pill">未选</span></div>
+                <div class="list-item" style="padding:7px 5px"><span class="mono tiny muted">05</span><div class="li-main"><div class="t">3D 体渲染</div><div class="s">Mayavi · LOD 2×</div></div><span class="pill green">已选</span></div>
+                <div class="list-item" style="padding:7px 5px"><span class="mono tiny muted">06</span><div class="li-main"><div class="t">结论与局限</div><div class="s">自动生成 · 需人工复核</div></div><span class="pill green">已选</span></div>
+                <div class="list-item" style="padding:7px 5px"><span class="mono tiny muted">07</span><div class="li-main"><div class="t">附录：复现信息</div><div class="s">数据哈希 · 模型 · 代码</div></div><span class="pill green">已选</span></div>
+              </div>
+              <div class="sep"></div>
+              <button class="btn small ghost" style="width:100%">添加自定义章节</button>
+            </div>
+          </div>
+
+          <div class="card" style="padding:14px;background:rgba(10,19,34,.55)">
+            <div class="flex between" style="margin-bottom:9px"><span class="small muted">A4 · 预览</span><span class="pill">PDF 就绪</span></div>
+            <div class="report-page">
+              <h3>全球气温异常场分析报告</h3>
+              <div class="rp-sub">ADVP AUTOMATED ANALYSIS · 2025 ANNUAL</div>
+              <div class="rp-meta"><span>数据：global_temp_2025.nc</span><span>模型：gpt-4.1</span><span>版本：v0.1.0</span><span>生成：2026-10-22</span></div>
+              <h4>摘要</h4>
+              <p>本报告基于 1,204,882 条观测记录，分析 2025 年全球气温异常的空间分布与季节趋势。数据覆盖 8,420 个站点，缺失率 4.2%，已采用前向填充并标注影响范围。</p>
+              <p>结果显示：北半球高纬度地区冬季升温幅度显著，年均异常值较基线高 1.28°C；热带地区季节波动较小。3D 体渲染展示了温度场的垂直结构。</p>
+              <h4>数据质量</h4>
+              <p>temperature 字段存在 4.2% 缺失，集中于 2025-01 与高纬度站点；pressure 单位已统一为 hPa；contact_email 已脱敏。质量评分 86/100。</p>
+              <div class="rp-chart">
+                <svg viewBox="0 0 520 110" style="width:100%;display:block">
+                  <g stroke="#e2ddd0"><path d="M30 90h470M30 60h470M30 30h470"/></g>
+                  <path d="M30 78 C70 70 95 52 135 58 S200 80 240 62 300 34 340 42 400 60 440 38 480 22 500 28" fill="none" stroke="#2b8a7a" stroke-width="1.8"/>
+                  <path d="M30 88 C70 84 95 70 135 74 S200 90 240 78 300 56 340 62 400 76 440 58 480 46 500 50" fill="none" stroke="#8b7cff" stroke-width="1.2" stroke-dasharray="4 3"/>
+                  <g fill="#6b6f78" font-size="6"><text x="28" y="104">JAN</text><text x="150" y="104">APR</text><text x="270" y="104">JUL</text><text x="390" y="104">OCT</text><text x="490" y="104">DEC</text></g>
+                </svg>
+                <div class="rp-note">图 3 · 月度气温异常趋势；虚线为基线。</div>
+              </div>
+              <h4>结论与局限</h4>
+              <p>升温趋势在高纬度地区更为显著，但站点分布不均可能引入偏差；3D 体渲染基于 LOD 2× 降采样，细节解释需谨慎。建议结合原始分辨率数据复核关键区域。</p>
+              <div class="rp-note">本报告由 AI 生成，关键结论需人工复核。复现信息见附录。</div>
+            </div>
+          </div>
+
+          <div class="grid" style="align-content:start">
+            <div class="card">
+              <div class="card-head"><h3>导出设置</h3><span class="sub">6 图 · 中文</span></div>
+              <div class="card-body">
+                <div class="export-format on" data-format><div class="fi">PDF</div><div><div class="t">PDF 报告</div><div class="s">A4 · 300 DPI · 嵌入字体</div></div><span class="ck">✓</span></div>
+                <div class="export-format" data-format><div class="fi">MD</div><div><div class="t">Markdown</div><div class="s">便于版本管理与二次编辑</div></div><span class="ck">✓</span></div>
+                <div class="export-format" data-format><div class="fi">PNG</div><div><div class="t">图表包</div><div class="s">6 张 · 2× 分辨率</div></div><span class="ck">✓</span></div>
+                <div class="export-format" data-format><div class="fi">PY</div><div><div class="t">可复现脚本</div><div class="s">含依赖锁与 manifest</div></div><span class="ck">✓</span></div>
+                <div class="sep"></div>
+                <div class="field"><label>报告语言</label><select class="select"><option>中文</option><option>English</option></select></div>
+                <div class="field mt8"><label>模板</label><select class="select"><option>科研报告</option><option>业务周报</option></select></div>
+                <div class="flex between mt10"><span class="small">包含生成代码</span><span class="switch on"></span></div>
+                <div class="flex between mt8"><span class="small">包含数据血缘</span><span class="switch on"></span></div>
+                <div class="flex between mt8"><span class="small">包含原始路径</span><span class="switch"></span></div>
+                <button class="btn primary mt14" style="width:100%" id="exportBtn2">加入导出队列</button>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>导出队列</h3><span class="pill">1</span></div>
+              <div class="card-body" id="queueBox">
+                <div class="list-item" style="padding:6px 0"><div class="li-icon"><span class="mono" style="font-size:8px">PDF</span></div><div class="li-main"><div class="t">全球气温异常场分析报告</div><div class="s">进行中 · 62%</div><div class="bar-row" style="margin:5px 0 0"><span class="track"><i style="width:62%"></i></span></div></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="footer-note"><span>manifest：数据哈希 9f2c… · 模型 gpt-4.1 · prompt v3 · 代码 v0.1.0</span><span class="mono">export queue 1</span></div>
+      </section>
+
+      <!-- P08 -->
+      <section class="page" id="page-p08">
+        <div class="page-head">
+          <div>
+            <div class="eyebrow">PROVIDERS / CREDENTIALS</div>
+            <h2>Provider 设置</h2>
+            <p>配置 OpenAI 兼容与 Anthropic 兼容服务；密钥仅存 Windows 凭据管理器；支持主备切换与预算控制。</p>
+          </div>
+          <div class="head-actions">
+            <span class="pill green"><i class="dot-s"></i>主备健康</span>
+            <button class="btn primary">添加 Provider</button>
+          </div>
+        </div>
+
+        <div class="grid split-3">
+          <div class="card" style="align-self:start">
+            <div class="card-head"><h3>Provider</h3><span class="sub">2 个</span></div>
+            <div class="card-body" style="padding:10px">
+              <div class="provider-item on">
+                <div class="provider-logo">OA</div>
+                <div><div class="t">OpenAI 兼容</div><div class="s">gpt-4.1 · 主用</div></div>
+                <span class="st pill green"><i class="dot-s"></i>可用</span>
+              </div>
+              <div class="provider-item">
+                <div class="provider-logo">AN</div>
+                <div><div class="t">Anthropic 兼容</div><div class="s">claude-sonnet · 备用</div></div>
+                <span class="st pill green"><i class="dot-s"></i>可用</span>
+              </div>
+              <div class="sep"></div>
+              <div class="tiny muted">主备顺序</div>
+              <div class="flex mt8" style="gap:6px;flex-wrap:wrap"><span class="pill cyan">1 · OpenAI</span><span class="pill violet">2 · Anthropic</span><span class="pill">3 · 规则降级</span></div>
+              <div class="sep"></div>
+              <div class="tiny muted">数据外发策略</div>
+              <div class="issue mt8" style="margin-bottom:6px"><span class="sev low"></span><div class="body"><div class="t">元数据 + 样本</div><div class="s">100 行 / 1MB · 敏感字段脱敏</div></div></div>
+              <div class="issue" style="margin-bottom:0"><span class="sev mid"></span><div class="body"><div class="t">全量数据：关闭</div><div class="s">开启需二次确认</div></div></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h3>OpenAI 兼容 · 配置</h3><div class="flex"><span class="pill green">已连接</span><button class="btn small ghost">删除</button></div></div>
+            <div class="card-body">
+              <div class="form-grid">
+                <div class="field"><label>名称</label><input class="input" value="OpenAI 兼容（主）"></div>
+                <div class="field"><label>协议</label><select class="select"><option>OpenAI 兼容</option><option>Anthropic 兼容</option></select></div>
+                <div class="field full"><label>Base URL</label><input class="input mono" value="https://api.openai.com/v1"></div>
+                <div class="field full"><label>API Key</label><input class="input mono" type="password" value="••••••••••••••••••••••••4f2a"><div class="hint">保存至 Windows 凭据管理器 · 界面不回显明文</div></div>
+                <div class="field"><label>模型</label><input class="input mono" value="gpt-4.1"></div>
+                <div class="field"><label>超时 / 重试</label><input class="input" value="60s / 3"></div>
+                <div class="field"><label>代理</label><input class="input" value="系统默认"></div>
+                <div class="field"><label>并发上限</label><input class="input" value="2"></div>
+                <div class="field full"><label>自定义 Header</label><textarea class="input mono" rows="2">X-Organization: research
+X-Project: advp</textarea></div>
+              </div>
+              <div class="flex mt14"><button class="btn small" id="testProvider">测试连接</button><button class="btn small primary">保存</button><span class="tiny muted" id="testResult">上次测试：42ms · 模型列表可用</span></div>
+              <div class="sep"></div>
+              <div class="flex between"><span class="small">能力探测</span><span class="pill green">流式</span> <span class="pill green">JSON</span> <span class="pill green">工具调用</span></div>
+              <div class="sep"></div>
+              <div class="flex between"><span class="small">最近调用</span><span class="tiny muted">最近 24h · 按时间倒序</span></div>
+              <div class="list mt8">
+                <div class="list-item" style="padding:7px 0"><span class="pill green">成功</span><div class="li-main"><div class="t">select_chart · gpt-4.1</div><div class="s">2,940 / 612 tokens · 11.2s</div></div><span class="li-time">10:31</span></div>
+                <div class="list-item" style="padding:7px 0"><span class="pill green">成功</span><div class="li-main"><div class="t">profile_summary · gpt-4.1</div><div class="s">1,820 / 384 tokens · 6.8s</div></div><span class="li-time">10:31</span></div>
+                <div class="list-item" style="padding:7px 0"><span class="pill amber">重试</span><div class="li-main"><div class="t">report_draft · claude-sonnet</div><div class="s">限流 429 · 已切换备用 Provider</div></div><span class="li-time">09:58</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid" style="align-content:start">
+            <div class="card">
+              <div class="card-head"><h3>成本与预算</h3><span class="pill">本月</span></div>
+              <div class="card-body">
+                <div class="flex between"><span class="small muted">已用</span><span class="mono">$12.40 / $50.00</span></div>
+                <div class="bar-row mt8"><span class="lbl">24.8%</span><span class="track"><i style="width:25%"></i></span><span class="pct">$37.6</span></div>
+                <div class="kv mt10">
+                  <span class="k">今日</span><span class="v mono">$1.86</span>
+                  <span class="k">本任务</span><span class="v mono">$0.38 / $2.00</span>
+                  <span class="k">缓存命中</span><span class="v">12.4%</span>
+                </div>
+                <div class="sep"></div>
+                <div class="field"><label>任务预算上限</label><input class="input" value="2.00 USD"></div>
+                <div class="field mt8"><label>月度预算上限</label><input class="input" value="50.00 USD"></div>
+                <div class="flex between mt10"><span class="small">达到上限时暂停</span><span class="switch on"></span></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>安全</h3><span class="pill green">合规</span></div>
+              <div class="card-body">
+                <div class="status-row"><span class="lbl">凭据存储</span><span class="val">Windows Credential Manager</span></div>
+                <div class="status-row"><span class="lbl">日志脱敏</span><span class="val"><i class="dot"></i>开启</span></div>
+                <div class="status-row"><span class="lbl">全量外发</span><span class="val">需二次确认</span></div>
+                <div class="status-row"><span class="lbl">密钥扫描</span><span class="val">gitleaks · CI</span></div>
+                <div class="sep"></div>
+                <button class="btn small ghost" style="width:100%">清除全部凭据</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="footer-note"><span>Key 仅显示末 4 位 · 不写入日志/工程/导出物</span><span class="mono">provider 2 · fallback chain active</span></div>
+      </section>
+
+      <!-- P09 -->
+      <section class="page" id="page-p09">
+        <div class="page-head">
+          <div>
+            <div class="eyebrow">TRACEABILITY / AUDIT</div>
+            <h2>追溯与审计</h2>
+            <p>task_01J8V3 · 7 步 · 总耗时 04:12 · 总成本 $0.38 · 可从此步重跑</p>
+          </div>
+          <div class="head-actions">
+            <span class="pill cyan">全链路记录</span>
+            <button class="btn ghost">导出追溯 JSON</button>
+            <button class="btn">复制诊断</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>管线 DAG</h3><div class="flex"><span class="pill green">6 成功</span><span class="pill violet">1 运行</span><span class="pill amber">1 降级</span></div></div>
+          <div class="card-body" style="padding:12px">
+            <div class="dag" id="dag">
+              <svg viewBox="0 0 1000 270" preserveAspectRatio="none">
+                <g stroke="#27405f" stroke-width="1.4" fill="none">
+                  <path d="M120 95H220"/>
+                  <path d="M300 95H400"/>
+                  <path d="M480 95H580"/>
+                  <path d="M660 95H760"/>
+                  <path d="M845 95C880 95 920 120 920 160"/>
+                  <path d="M920 215C900 225 870 225 845 225"/>
+                </g>
+                <g stroke="#f2b84b" stroke-opacity=".55" stroke-width="1.2" fill="none" stroke-dasharray="4 5">
+                  <path d="M800 115C780 140 720 152 700 172"/>
+                  <path d="M660 210C680 225 730 225 760 225"/>
+                </g>
+                <g fill="#35d0ba"><circle cx="120" cy="95" r="2.4"/><circle cx="300" cy="95" r="2.4"/><circle cx="480" cy="95" r="2.4"/><circle cx="660" cy="95" r="2.4"/><circle cx="845" cy="95" r="2.4"/></g>
+                <g fill="#f2b84b"><circle cx="700" cy="172" r="2.2"/><circle cx="760" cy="225" r="2.2"/></g>
+              </svg>
+              <div class="dag-node done" style="left:8%;top:35%"><div class="t">数据接入</div><div class="s">0.8s</div></div>
+              <div class="dag-node done" style="left:26%;top:35%"><div class="t">画像</div><div class="s">6.8s</div></div>
+              <div class="dag-node done" style="left:44%;top:35%"><div class="t">清洗</div><div class="s">5.1s</div></div>
+              <div class="dag-node done" style="left:62%;top:35%"><div class="t">分析</div><div class="s">7.6s</div></div>
+              <div class="dag-node active" style="left:80%;top:35%"><div class="t">选图</div><div class="s">运行中</div></div>
+              <div class="dag-node" style="left:92%;top:70%"><div class="t">渲染</div><div class="s">等待</div></div>
+              <div class="dag-node warn" style="left:68%;top:70%"><div class="t">降级事件</div><div class="s">重选 1 次</div></div>
+              <div class="dag-node" style="left:80%;top:83%"><div class="t">报告</div><div class="s">等待</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid split-2-1 mt14">
+          <div class="grid" style="align-content:start">
+            <div class="card">
+              <div class="card-head"><h3>步骤详情 · 选图</h3><div class="flex"><span class="pill violet">running</span><span class="pill">11.2s</span><span class="pill">2,940 / 612 tokens</span></div></div>
+              <div class="card-body">
+                <div class="grid g-2">
+                  <div class="kv">
+                    <span class="k">模型</span><span class="v">gpt-4.1</span>
+                    <span class="k">Provider</span><span class="v">OpenAI 兼容</span>
+                    <span class="k">提示词</span><span class="v mono">select_chart@v3</span>
+                    <span class="k">温度</span><span class="v mono">0.2</span>
+                    <span class="k">候选数</span><span class="v">7 → 4</span>
+                    <span class="k">置信度</span><span class="v">0.86</span>
+                  </div>
+                  <div class="kv">
+                    <span class="k">输入哈希</span><span class="v mono">a91c…7f2</span>
+                    <span class="k">输出哈希</span><span class="v mono">3be0…c14</span>
+                    <span class="k">费用</span><span class="v mono">$0.21</span>
+                    <span class="k">重选</span><span class="v">1 / 2</span>
+                    <span class="k">降级</span><span class="v">无</span>
+                    <span class="k">可重跑</span><span class="v">是</span>
+                  </div>
+                </div>
+                <div class="sep"></div>
+                <div class="flex between"><span class="small">选型理由</span><span class="pill cyan">结构化输出</span></div>
+                <div class="tiny muted mt8" style="line-height:1.7">数据包含 3 个连续变量与 3 个空间维度；体渲染能同时表达空间分布与标量强度。等值面在阈值选择上更敏感，切片信息密度较低，因此评分次之。</div>
+                <div class="flex mt14"><button class="btn small">从此步重跑</button><button class="btn small ghost">查看完整候选</button><button class="btn small ghost">复制代码</button></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>生成代码</h3><div class="flex"><span class="pill">mayavi_render.py</span><button class="btn small ghost">复制</button><button class="btn small ghost">下载</button></div></div>
+              <div class="card-body">
+                <div class="code"><span class="cm"># auto-generated · prompt select_chart@v3 · model gpt-4.1</span>
+<span class="kw">from</span> mayavi <span class="kw">import</span> mlab
+<span class="kw">import</span> xarray <span class="kw">as</span> xr
+
+ds = xr.<span class="fn">open_dataset</span>(<span class="st">"global_temp_2025.nc"</span>)
+temp = ds[<span class="st">"temperature"</span>].<span class="fn">isel</span>(time=<span class="nm">0</span>)
+
+src = mlab.<span class="fn">pipeline</span>.scalar_field(temp.values, name=<span class="st">"temperature"</span>)
+vol = mlab.<span class="fn">pipeline</span>.volume(src, colormap=<span class="st">"CoolWarm"</span>)
+vol.volume_property.<span class="fn">set_scalar_range</span>((-<span class="nm">40</span>, <span class="nm">40</span>))
+
+mlab.<span class="fn">view</span>(<span class="nm">180</span>, <span class="nm">70</span>, <span class="nm">1.2</span>, bgcolor=(<span class="nm">0.03</span>, <span class="nm">0.06</span>, <span class="nm">0.11</span>))
+mlab.<span class="fn">savefig</span>(<span class="st">"render_volume.png"</span>, size=(<span class="nm">1920</span>, <span class="nm">1080</span>), magnification=<span class="nm">2</span>)</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid" style="align-content:start">
+            <div class="card">
+              <div class="card-head"><h3>数据血缘</h3><span class="sub">4 层</span></div>
+              <div class="card-body">
+                <div class="list">
+                  <div class="list-item"><div class="li-icon"><span class="mono" style="font-size:7px">NC</span></div><div class="li-main"><div class="t">global_temp_2025.nc</div><div class="s">原始 · 812MB · sha 9f2c…</div></div></div>
+                  <div class="list-item"><div class="li-icon"><span class="mono" style="font-size:7px">DS</span></div><div class="li-main"><div class="t">ds_temp_clean_v3</div><div class="s">派生 · 58,204 行变更 · recipe r_07</div></div></div>
+                  <div class="list-item"><div class="li-icon"><span class="mono" style="font-size:7px">3D</span></div><div class="li-main"><div class="t">volume_temperature</div><div class="s">图表 · Mayavi · LOD 2×</div></div></div>
+                  <div class="list-item"><div class="li-icon"><span class="mono" style="font-size:7px">RP</span></div><div class="li-main"><div class="t">report_v1.pdf</div><div class="s">报告 · 6 图 · 待生成</div></div></div>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>成本</h3><span class="pill">$0.38</span></div>
+              <div class="card-body">
+                <div class="bar-row"><span class="lbl">分析</span><span class="track"><i style="width:48%"></i></span><span class="pct">$0.18</span></div>
+                <div class="bar-row"><span class="lbl">选图</span><span class="track"><i style="width:56%"></i></span><span class="pct">$0.21</span></div>
+                <div class="bar-row"><span class="lbl">重选</span><span class="track"><i style="width:22%"></i></span><span class="pct">$0.08</span></div>
+                <div class="bar-row"><span class="lbl">清洗</span><span class="track"><i style="width:12%"></i></span><span class="pct">$0.04</span></div>
+                <div class="sep"></div>
+                <div class="flex between small"><span class="muted">今日累计</span><span class="mono">$1.86</span></div>
+                <div class="flex between small mt8"><span class="muted">月度预算</span><span class="mono">$12.40 / $50.00</span></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>日志</h3><span class="pill green">脱敏</span></div>
+              <div class="card-body">
+                <div class="log" style="height:150px">
+                  <div class="ln"><span class="ts">10:31:28</span><span class="lv w">WARN</span><span class="msg">select.low_confidence top1=0.74</span></div>
+                  <div class="ln"><span class="ts">10:31:28</span><span class="lv i">INFO</span><span class="msg">select.reselect attempt=1</span></div>
+                  <div class="ln"><span class="ts">10:31:34</span><span class="lv ok"> OK </span><span class="msg">select.done score=0.86</span></div>
+                  <div class="ln"><span class="ts">10:31:34</span><span class="lv i">INFO</span><span class="msg">render.queue backend=mayavi</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="footer-note"><span>审计事件：Provider 切换、预算变更、全量外发均留痕</span><span class="mono">logs/2026-10-22.jsonl</span></div>
+      </section>
+
+      <!-- P10 -->
+      <section class="page" id="page-p10">
+        <div class="page-head">
+          <div>
+            <div class="eyebrow">SETTINGS / ABOUT</div>
+            <h2>设置与关于</h2>
+            <p>应用级设置、工作区、沙箱、AI 默认值与版本信息。</p>
+          </div>
+          <div class="head-actions">
+            <span class="pill">本地单用户</span>
+            <button class="btn">恢复默认</button>
+            <button class="btn primary" id="saveSettings">保存设置</button>
+          </div>
+        </div>
+
+        <div class="settings-grid">
+          <div class="grid" style="align-content:start">
+            <div class="card">
+              <div class="card-head"><h3>通用</h3><span class="sub">GENERAL</span></div>
+              <div class="card-body">
+                <div class="setting-row"><div><div class="t">界面语言</div><div class="s">中英双语即时切换；报告语言独立设置</div></div><div class="ctl"><select class="select"><option>简体中文</option><option>English</option></select></div></div>
+                <div class="setting-row"><div><div class="t">主题</div><div class="s">v1 仅提供深色科研风；浅色主题保留扩展能力</div></div><div class="ctl"><select class="select" disabled><option>深色科研</option></select></div></div>
+                <div class="setting-row"><div><div class="t">工作区路径</div><div class="s">工程、派生数据、导出与缓存</div></div><div class="ctl"><input class="input mono" value="%USERPROFILE%\ADVP\workspace"></div></div>
+                <div class="setting-row"><div><div class="t">自动保存</div><div class="s">关键操作后立即保存，另每 30 秒保存一次</div></div><div class="ctl"><span class="switch on"></span></div></div>
+                <div class="setting-row"><div><div class="t">磁盘占用</div><div class="s">派生数据 18.4GB · 缓存 3.2GB · 日志 240MB</div></div><div class="ctl"><button class="btn small ghost">清理</button></div></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>分析</h3><span class="sub">PIPELINE</span></div>
+              <div class="card-body">
+                <div class="setting-row"><div><div class="t">默认自动化</div><div class="s">全自动优先；低置信度时展示 Top3</div></div><div class="ctl"><span class="switch on"></span></div></div>
+                <div class="setting-row"><div><div class="t">LLM 样本行数</div><div class="s">发送给模型的最大样本；上限 1000 行 / 1MB</div></div><div class="ctl"><input class="input" value="100"></div></div>
+                <div class="setting-row"><div><div class="t">选图评分阈值</div><div class="s">低于阈值触发自动重选，最多 2 次</div></div><div class="ctl"><input class="input" value="0.75"></div></div>
+                <div class="setting-row"><div><div class="t">任务并发</div><div class="s">默认 2；5GB/3D 场景建议 1</div></div><div class="ctl"><select class="select"><option>2</option><option>1</option></select></div></div>
+                <div class="setting-row"><div><div class="t">大文件降采样</div><div class="s">超过 2000 万行或 1GB 时自动采样并标注</div></div><div class="ctl"><span class="switch on"></span></div></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>安全与沙箱</h3><span class="sub">SECURITY</span></div>
+              <div class="card-body">
+                <div class="setting-row"><div><div class="t">生成代码执行</div><div class="s">本地受限子进程；禁网、限资源、仅工作区读写</div></div><div class="ctl"><span class="pill green">已启用</span></div></div>
+                <div class="setting-row"><div><div class="t">内存上限</div><div class="s">单任务；超过后终止并提示</div></div><div class="ctl"><input class="input" value="8 GB"></div></div>
+                <div class="setting-row"><div><div class="t">执行超时</div><div class="s">单步最长执行时间</div></div><div class="ctl"><input class="input" value="300s"></div></div>
+                <div class="setting-row"><div><div class="t">日志保留</div><div class="s">滚动清理；诊断包导出前脱敏</div></div><div class="ctl"><select class="select"><option>14 天</option><option>7 天</option><option>30 天</option></select></div></div>
+                <div class="setting-row"><div><div class="t">全量数据外发</div><div class="s">默认关闭；开启需二次确认并留痕</div></div><div class="ctl"><span class="switch"></span></div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid" style="align-content:start">
+            <div class="card">
+              <div class="card-head"><h3>关于</h3><span class="pill cyan">v0.1.0</span></div>
+              <div class="card-body">
+                <div class="flex" style="gap:12px;align-items:flex-start">
+                  <div class="brand-mark" style="width:44px;height:44px;flex:0 0 auto"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#35d0ba" stroke-width="1.7"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z"/><path d="M12 12v9M4 7.5l8 4.5 8-4.5"/></svg></div>
+                  <div><div style="font-weight:650;font-size:14px">ADVP</div><div class="tiny muted">Automated Data Visualization Platform</div><div class="tiny muted mt8">本地 Web 应用 · Windows · 单用户</div></div>
+                </div>
+                <div class="sep"></div>
+                <div class="kv">
+                  <span class="k">版本</span><span class="v mono">v0.1.0 (prototype)</span>
+                  <span class="k">构建</span><span class="v mono">2026-10-22 · local</span>
+                  <span class="k">许可</span><span class="v">Apache-2.0（建议）</span>
+                  <span class="k">运行时</span><span class="v">Python 3.12 · Node 24</span>
+                  <span class="k">渲染</span><span class="v">VTK 9.3 · Mayavi 4.8</span>
+                  <span class="k">规则</span><span class="v">SemVer · patch +1</span>
+                </div>
+                <div class="sep"></div>
+                <div class="flex"><button class="btn small ghost">检查更新</button><button class="btn small ghost">开源许可</button><button class="btn small ghost">诊断包</button></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>版本与仓库</h3><span class="pill violet">严格模式</span></div>
+              <div class="card-body">
+                <div class="status-row"><span class="lbl">公开仓库</span><span class="val">advp · 脱敏</span></div>
+                <div class="status-row"><span class="lbl">私有仓库</span><span class="val">advp-private · 全量</span></div>
+                <div class="status-row"><span class="lbl">分支保护</span><span class="val">main + PR</span></div>
+                <div class="status-row"><span class="lbl">CI</span><span class="val">ruff · mypy · pytest · eslint · tsc · vitest</span></div>
+                <div class="status-row"><span class="lbl">安全扫描</span><span class="val">gitleaks · Dependabot</span></div>
+                <div class="status-row"><span class="lbl">提交规范</span><span class="val">Conventional Commits</span></div>
+                <div class="sep"></div>
+                <div class="tiny muted">每次修改 = 一个原子 commit = 一个 patch 版本；CHANGELOG 与 tag 同步。</div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>开发者</h3><span class="sub">DEBUG</span></div>
+              <div class="card-body">
+                <div class="setting-row"><div><div class="t">本地 API 地址</div><div class="s">仅回环；启动令牌校验</div></div><div class="ctl"><span class="mono tiny">127.0.0.1:5173</span></div></div>
+                <div class="setting-row"><div><div class="t">日志级别</div><div class="s">运行日志与追溯同源</div></div><div class="ctl"><select class="select"><option>INFO</option><option>DEBUG</option><option>WARN</option></select></div></div>
+                <div class="setting-row"><div><div class="t">诊断信息</div><div class="s">环境、版本、配置（脱敏）</div></div><div class="ctl"><button class="btn small ghost">导出</button></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="footer-note"><span>ADVP v0.1.0 · 高保真原型 · 深色科研风</span><span class="mono">10 pages · offline</span></div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<!-- Top3 modal -->
+<div class="modal-backdrop" id="top3Modal">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <h3>图表候选 Top3</h3>
+        <p>低置信度触发 · 候选来自规则筛选后的注册表 · 默认采用最高分</p>
+      </div>
+      <button class="x" data-close="top3Modal">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="cand-grid">
+        <div class="cand best">
+          <div class="ct"><b>体渲染 Volume</b><span class="score">0.86</span></div>
+          <div class="thumb2"><svg viewBox="0 0 200 78"><defs><radialGradient id="vg"><stop offset="0" stop-color="#dffaf5" stop-opacity=".8"/><stop offset=".45" stop-color="#35d0ba" stop-opacity=".35"/><stop offset="1" stop-color="#8b7cff" stop-opacity=".05"/></radialGradient></defs><ellipse cx="100" cy="40" rx="52" ry="30" fill="url(#vg)"/><ellipse cx="100" cy="40" rx="34" ry="20" fill="none" stroke="#35d0ba" stroke-opacity=".4"/></svg></div>
+          <div class="why">同时表达三维空间分布与标量强度；适合温度场整体结构。需注意传输函数对解读的影响。</div>
+          <button class="btn primary pick" data-pick="体渲染">采用此方案</button>
+        </div>
+        <div class="cand">
+          <div class="ct"><b>等值面 Isosurface</b><span class="score">0.74</span></div>
+          <div class="thumb2"><svg viewBox="0 0 200 78"><ellipse cx="100" cy="40" rx="46" ry="26" fill="none" stroke="#8b7cff" stroke-opacity=".6"/><ellipse cx="100" cy="40" rx="30" ry="16" fill="none" stroke="#8b7cff" stroke-opacity=".4"/><path d="M60 40h80" stroke="#35d0ba" stroke-opacity=".5"/></svg></div>
+          <div class="why">边界清晰、适合阈值分析；但单阈值会丢失内部结构，需多阈值联动。</div>
+          <button class="btn pick" data-pick="等值面">采用此方案</button>
+        </div>
+        <div class="cand">
+          <div class="ct"><b>切片 Slice</b><span class="score">0.71</span></div>
+          <div class="thumb2"><svg viewBox="0 0 200 78"><rect x="40" y="18" width="120" height="42" fill="#0d1c31" stroke="#2a3d5c"/><path d="M40 48 C70 40 90 52 120 44 S150 32 160 36" stroke="#5aa9ff" fill="none"/><path d="M40 34 C70 28 90 40 120 30 S150 24 160 28" stroke="#35d0ba" fill="none"/></svg></div>
+          <div class="why">精确读取单层数值；信息密度低，不适合作为总览图。</div>
+          <button class="btn pick" data-pick="切片">采用此方案</button>
+        </div>
+      </div>
+      <div class="sep"></div>
+      <div class="flex between"><span class="tiny muted">评分维度：适配性 · 可读性 · 信息密度 · 性能 · 科学合规</span><span class="tiny muted">重选 1 / 2 次</span></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" data-close="top3Modal">保持当前</button>
+      <button class="btn primary" data-close="top3Modal" id="acceptBest">采用最高分并继续</button>
+    </div>
+  </div>
+</div>
+
+<!-- Manifest modal -->
+<div class="modal-backdrop" id="manifestModal">
+  <div class="modal" style="width:min(720px,100%)">
+    <div class="modal-head"><div><h3>复现 Manifest</h3><p>导出物将包含以下信息，用于复现与审计</p></div><button class="x" data-close="manifestModal">×</button></div>
+    <div class="modal-body">
+      <div class="code">{
+  "project": "global-temp-2025",
+  "version": "0.1.0",
+  "data": {
+    "path": "D:/data/climate/global_temp_2025.nc",
+    "sha256": "9f2c...a71e",
+    "rows": 1204882
+  },
+  "pipeline": {
+    "recipe": "r_07",
+    "model": "gpt-4.1",
+    "prompt": "select_chart@v3",
+    "temperature": 0.2
+  },
+  "scene": "scene_volume_temperature.json",
+  "backend": "mayavi 4.8 / vtk 9.3",
+  "cost_usd": 0.38,
+  "created_at": "2026-10-22T10:35:14Z"
+}</div>
+      <div class="tiny muted mt10">导出前会自动检查密钥、敏感样本与绝对路径；可配置是否包含原始路径。</div>
+    </div>
+    <div class="modal-foot"><button class="btn ghost" data-close="manifestModal">关闭</button><button class="btn primary" data-close="manifestModal">复制 JSON</button></div>
+  </div>
+</div>
+
+<!-- Command palette -->
+<div class="palette" id="palette">
+  <div class="modal">
+    <input id="paletteInput" placeholder="跳转到页面或搜索…">
+    <div class="plist">
+      <div class="pitem" data-jump="p01">工程首页 <span class="k">P01</span></div>
+      <div class="pitem" data-jump="p02">数据导入 <span class="k">P02</span></div>
+      <div class="pitem" data-jump="p03">数据预览与质量 <span class="k">P03</span></div>
+      <div class="pitem" data-jump="p04">AI 管线运行 <span class="k">P04</span></div>
+      <div class="pitem" data-jump="p05">2D 图表工作台 <span class="k">P05</span></div>
+      <div class="pitem" data-jump="p06">3D 科学视图 <span class="k">P06</span></div>
+      <div class="pitem" data-jump="p07">报告与导出 <span class="k">P07</span></div>
+      <div class="pitem" data-jump="p08">Provider 设置 <span class="k">P08</span></div>
+      <div class="pitem" data-jump="p09">追溯与审计 <span class="k">P09</span></div>
+      <div class="pitem" data-jump="p10">设置与关于 <span class="k">P10</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toasts"></div>
+
+<script>
+  const pages = {
+    p01: {title:"工程首页", sub:"本地工作区 · 最近 7 天"},
+    p02: {title:"数据导入", sub:"文件 · 数据库 · URL · 文档 · 实时流"},
+    p03: {title:"数据预览与质量", sub:"global_temp_2025.nc · 1.2M 行"},
+    p04: {title:"AI 管线运行", sub:"全自动 · 7 步 · 可追溯"},
+    p05: {title:"2D 图表工作台", sub:"销售趋势 · 自动选型 0.91"},
+    p06: {title:"3D 科学视图", sub:"体渲染 · Mayavi · LOD 2×"},
+    p07: {title:"报告与导出", sub:"A4 · 6 图 · 可复现包"},
+    p08: {title:"Provider 设置", sub:"OpenAI / Anthropic 兼容"},
+    p09: {title:"追溯与审计", sub:"DAG · 血缘 · 成本 · 代码"},
+    p10: {title:"设置与关于", sub:"v0.1.0 · 本机单用户"}
+  };
+
+  function showPage(id, push=true){
+    if(!pages[id]) return;
+    document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active', p.id === 'page-'+id));
+    document.querySelectorAll('.nav-item[data-page]').forEach(b=>b.classList.toggle('active', b.dataset.page === id));
+    document.getElementById('crumb').textContent = pages[id].title;
+    document.getElementById('topTitle').textContent = pages[id].title;
+    document.getElementById('topSub').textContent = pages[id].sub;
+    if(push) history.replaceState(null,'','#'+id);
+    window.scrollTo({top:0,behavior:'smooth'});
+  }
+
+  document.querySelectorAll('[data-page]').forEach(b=>{
+    b.addEventListener('click',()=>showPage(b.dataset.page));
+  });
+  document.querySelectorAll('[data-jump]').forEach(b=>{
+    b.addEventListener('click',()=>{ showPage(b.dataset.jump); closePalette(); });
+  });
+
+  if(location.hash && pages[location.hash.slice(1)]) showPage(location.hash.slice(1), false);
+
+  // tabs
+  document.querySelectorAll('[data-tab-group]').forEach(group=>{
+    const host = group.closest('.card');
+    group.querySelectorAll('.tab').forEach(tab=>{
+      tab.addEventListener('click',()=>{
+        group.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+        tab.classList.add('active');
+        host.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active', p.dataset.panel === tab.dataset.tab));
+      });
+    });
+  });
+
+  // modals
+  function openModal(id){ document.getElementById(id).classList.add('open'); }
+  function closeModal(id){ document.getElementById(id).classList.remove('open'); }
+  document.querySelectorAll('[data-modal]').forEach(b=>b.addEventListener('click',()=>openModal(b.dataset.modal)));
+  document.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click',()=>closeModal(b.dataset.close)));
+  document.querySelectorAll('.modal-backdrop').forEach(bg=>{
+    bg.addEventListener('click',e=>{ if(e.target === bg) bg.classList.remove('open'); });
+  });
+  document.addEventListener('keydown',e=>{
+    if(e.key === 'Escape'){
+      document.querySelectorAll('.modal-backdrop.open').forEach(m=>m.classList.remove('open'));
+      closePalette();
+    }
+    if((e.ctrlKey||e.metaKey) && e.key.toLowerCase() === 'k'){ e.preventDefault(); togglePalette(); }
+  });
+
+  function toast(msg){
+    const wrap = document.getElementById('toasts');
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.innerHTML = '<span class="ic">✓</span><span>'+msg+'</span>';
+    wrap.appendChild(el);
+    setTimeout(()=>{ el.style.opacity='0'; el.style.transform='translateY(6px)'; el.style.transition='.2s'; setTimeout(()=>el.remove(),220); }, 2600);
+  }
+
+  // Top3 pick
+  document.querySelectorAll('[data-pick]').forEach(b=>{
+    b.addEventListener('click',()=>{
+      closeModal('top3Modal');
+      toast('已切换为「'+b.dataset.pick+'」，正在重新渲染');
+    });
+  });
+  const acceptBest = document.getElementById('acceptBest');
+  if(acceptBest) acceptBest.addEventListener('click',()=>toast('已采用最高分：体渲染'));
+
+  // import
+  const confirmImport = document.getElementById('confirmImport');
+  if(confirmImport) confirmImport.addEventListener('click',()=>{ toast('导入完成：2 个数据集'); showPage('p03'); });
+  const browseBtn = document.getElementById('browseBtn');
+  if(browseBtn) browseBtn.addEventListener('click',()=>toast('演示原型：未连接真实文件选择器'));
+  const testDb = document.getElementById('testDb');
+  if(testDb) testDb.addEventListener('click',()=>toast('连接成功：PostgreSQL 16 · 42ms'));
+
+  // pipeline
+  const pauseBtn = document.getElementById('pauseBtn');
+  if(pauseBtn) pauseBtn.addEventListener('click',()=>{
+    const paused = pauseBtn.dataset.paused === '1';
+    pauseBtn.dataset.paused = paused ? '0' : '1';
+    pauseBtn.textContent = paused ? '暂停' : '继续';
+    toast(paused ? '任务已继续' : '任务已暂停');
+  });
+  const cancelBtn = document.getElementById('cancelBtn');
+  if(cancelBtn) cancelBtn.addEventListener('click',()=>toast('已请求取消，正在终止子步骤'));
+  const chatSend = document.getElementById('chatSend');
+  if(chatSend) chatSend.addEventListener('click',()=>{
+    const input = document.getElementById('chatInput');
+    if(input.value.trim()){ toast('已发送修正指令，将记录到追溯'); input.value=''; }
+  });
+
+  // provider test
+  const testProvider = document.getElementById('testProvider');
+  if(testProvider) testProvider.addEventListener('click',()=>{
+    const res = document.getElementById('testResult');
+    res.textContent = '测试中…';
+    setTimeout(()=>{ res.textContent = '连接成功 · 38ms · gpt-4.1 可用'; toast('Provider 连接测试通过'); }, 700);
+  });
+
+  // export
+  function addExport(){
+    const q = document.getElementById('queueBox');
+    const item = document.createElement('div');
+    item.className = 'list-item';
+    item.style.padding = '6px 0';
+    item.innerHTML = '<div class="li-icon"><span class="mono" style="font-size:8px">PDF</span></div><div class="li-main"><div class="t">分析报告 · 新增导出</div><div class="s">排队中 · 0%</div><div class="bar-row" style="margin:5px 0 0"><span class="track"><i style="width:4%"></i></span></div></div>';
+    q.appendChild(item);
+    toast('已加入导出队列');
+  }
+  const exportBtn = document.getElementById('exportBtn');
+  const exportBtn2 = document.getElementById('exportBtn2');
+  if(exportBtn) exportBtn.addEventListener('click',addExport);
+  if(exportBtn2) exportBtn2.addEventListener('click',addExport);
+  const previewManifest = document.getElementById('previewManifest');
+  if(previewManifest) previewManifest.addEventListener('click',()=>openModal('manifestModal'));
+  document.querySelectorAll('[data-format]').forEach(f=>{
+    f.addEventListener('click',()=>f.classList.toggle('on'));
+  });
+
+  // backend toggle
+  const backendBtn = document.getElementById('backendBtn');
+  if(backendBtn) backendBtn.addEventListener('click',()=>{
+    toast('已切换渲染后端，正在重建场景（演示）');
+    const b = document.getElementById('gpuBadge');
+    b.textContent = b.textContent === '集显降级' ? 'GPU 加速' : '集显降级';
+  });
+  const animBtn = document.getElementById('animBtn');
+  if(animBtn) animBtn.addEventListener('click',()=>toast('动画任务已加入队列：MP4 · 30fps'));
+
+  // settings
+  const saveSettings = document.getElementById('saveSettings');
+  if(saveSettings) saveSettings.addEventListener('click',()=>toast('设置已保存 · 工程版本 +1（演示）'));
+
+  // switches
+  document.querySelectorAll('.switch').forEach(s=>{
+    s.addEventListener('click',()=>s.classList.toggle('on'));
+  });
+
+  // command palette
+  const palette = document.getElementById('palette');
+  const searchBtn = document.getElementById('searchBtn');
+  function openPalette(){ palette.classList.add('open'); document.getElementById('paletteInput').focus(); }
+  function closePalette(){ palette.classList.remove('open'); }
+  function togglePalette(){ palette.classList.contains('open') ? closePalette() : openPalette(); }
+  if(searchBtn) searchBtn.addEventListener('click',openPalette);
+  document.getElementById('paletteInput').addEventListener('input',e=>{
+    const q = e.target.value.toLowerCase();
+    document.querySelectorAll('#palette .pitem').forEach(it=>{
+      it.style.display = it.textContent.toLowerCase().includes(q) ? 'flex' : 'none';
+    });
+  });
+
+  // language toggle (nav + page titles demo)
+  let en = false;
+  const langBtn = document.getElementById('langBtn');
+  const navMap = {
+    'nav.workspace':['工作台','WORKSPACE'], 'nav.home':['工程首页','Home'], 'nav.import':['数据导入','Import'],
+    'nav.quality':['数据质量','Quality'], 'nav.analysis':['分析','ANALYSIS'], 'nav.pipeline':['AI 管线','Pipeline'],
+    'nav.viz2d':['2D 工作台','2D Studio'], 'nav.viz3d':['3D 科学视图','3D Science'], 'nav.delivery':['交付','DELIVERY'],
+    'nav.report':['报告与导出','Report'], 'nav.trace':['追溯与审计','Trace'], 'nav.system':['系统','SYSTEM'],
+    'nav.provider':['Provider 设置','Providers'], 'nav.settings':['设置与关于','Settings']
+  };
+  if(langBtn) langBtn.addEventListener('click',()=>{
+    en = !en;
+    document.querySelectorAll('[data-i18n]').forEach(el=>{
+      const pair = navMap[el.dataset.i18n];
+      if(pair) el.textContent = en ? pair[1] : pair[0];
+    });
+    document.documentElement.lang = en ? 'en' : 'zh-CN';
+    toast(en ? 'Language: English (nav demo)' : '语言：简体中文');
+  });
+
+  // keyboard page shortcuts 1-9,0
+  document.addEventListener('keydown',e=>{
+    if(e.target.matches('input,textarea,select')) return;
+    const map = {'1':'p01','2':'p02','3':'p03','4':'p04','5':'p05','6':'p06','7':'p07','8':'p08','9':'p09','0':'p10'};
+    if(map[e.key]) showPage(map[e.key]);
+  });
+
+  // animate log scroll
+  const logBox = document.getElementById('logBox');
+  if(logBox) logBox.scrollTop = logBox.scrollHeight;
+</script>
+</body>
+</html>
