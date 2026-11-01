@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import json
+import time
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NoReturn
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
-from advp import audit
+from advp import audit, pipeline_events, search
 from advp import exports as export_service
 from advp import reports as report_service
 from advp import trace as trace_service
@@ -22,9 +24,11 @@ from advp.api.schemas import (
     PipelineRunSummary,
     ReportRegenerate,
 )
+from advp.db import get_session
 from advp.llm import providers as provider_service
 from advp.models import ChartSelection, Dataset, PipelineRun
 from advp.pipelines import (
+    TERMINAL_RUN_STATUSES,
     PipelineStateError,
     cancel_run,
     create_run,
@@ -83,6 +87,16 @@ def _report_step_or_404(session: Session, run: PipelineRun) -> Any:
     return step
 
 
+def _normalized_outline(outline: list[str] | None) -> list[str]:
+    try:
+        return report_service.normalize_outline(outline)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "invalid_report_outline", "message": str(exc)},
+        ) from exc
+
+
 def _regenerate_report(
     session: Session,
     run: PipelineRun,
@@ -91,6 +105,7 @@ def _regenerate_report(
     template: str = "standard",
     conclusion: str | None = None,
     include_chart: bool = True,
+    outline: list[str] | None = None,
 ) -> dict[str, Any]:
     steps = list_steps(session, run.id)
     working_id = str(run.options.get("working_dataset_id") or run.dataset_id)
@@ -122,6 +137,7 @@ def _regenerate_report(
         conclusion=conclusion,
         chart_image=chart_image,
         chart_note=chart_error,
+        outline=outline,
     )
     step = next((item for item in steps if item.key == "report"), None)
     if step is not None:
@@ -140,8 +156,10 @@ def _regenerate_report(
             "html_bytes": bundle["html_bytes"],
             "language": language,
             "template": template,
+            "outline": bundle["manifest"]["outline"],
         }
         session.commit()
+    search.safe_index_report(session, run, Path(str(bundle["md_path"])).read_text(encoding="utf-8"))
     bundle["chart_error"] = chart_error
     return bundle
 
@@ -186,6 +204,55 @@ def list_pipeline_runs(
 @router.get("/pipeline-runs/{run_id}", response_model=PipelineRunDetail)
 def get_pipeline_run(run_id: str, session: DbSession) -> dict[str, Any]:
     return pipeline_detail(session, _run_or_404(session, run_id))
+
+
+EVENT_POLL_SECONDS = 0.5
+EVENT_HEARTBEAT_POLLS = 30
+
+
+@router.get("/pipeline-runs/{run_id}/events")
+def stream_pipeline_events(
+    run_id: str,
+    session: DbSession,
+    since: int = Query(default=0, ge=0),
+) -> StreamingResponse:
+    """Stream persisted run events; `since` replays events after that sequence."""
+    _run_or_404(session, run_id)
+    return StreamingResponse(
+        _event_stream(run_id, since),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _event_stream(run_id: str, since: int) -> Iterator[str]:
+    cursor = since
+    idle = 0
+    while True:
+        session = get_session()
+        try:
+            rows = pipeline_events.list_events(session, run_id, since=cursor)
+            run = session.get(PipelineRun, run_id)
+            terminal = run is None or run.status in TERMINAL_RUN_STATUSES
+        finally:
+            session.close()
+        if rows:
+            for row in rows:
+                cursor = row.seq
+                payload = json.dumps(
+                    pipeline_events.event_dict(row),
+                    ensure_ascii=False,
+                    default=str,
+                )
+                yield f"id: {row.seq}\nevent: {row.type}\ndata: {payload}\n\n"
+            idle = 0
+            continue
+        if terminal:
+            return
+        idle += 1
+        if idle % EVENT_HEARTBEAT_POLLS == 0:
+            yield ": heartbeat\n\n"
+        time.sleep(EVENT_POLL_SECONDS)
 
 
 @router.get("/pipeline-runs/{run_id}/trace")
@@ -257,6 +324,33 @@ def get_report_manifest(run_id: str, session: DbSession) -> dict[str, Any]:
     return manifest
 
 
+@router.get("/pipeline-runs/{run_id}/report/package")
+def get_report_package(
+    run_id: str,
+    session: DbSession,
+    include_derived: bool = Query(default=False),
+) -> FileResponse:
+    run = _run_or_404(session, run_id)
+    _report_step_or_404(session, run)
+    try:
+        package = report_service.build_reproducible_package(
+            session,
+            run,
+            include_derived=include_derived,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "report_package_unavailable", "message": str(exc)},
+        ) from exc
+    path = Path(str(package["path"]))
+    return FileResponse(
+        path,
+        media_type="application/zip",
+        filename=f"ADVP-repro-{run.id}.zip",
+    )
+
+
 @router.get("/pipeline-runs/{run_id}/report")
 def get_pipeline_report(
     run_id: str,
@@ -326,6 +420,7 @@ def regenerate_pipeline_report(
         template=payload.template,
         conclusion=payload.conclusion,
         include_chart=payload.include_chart,
+        outline=_normalized_outline(payload.outline),
     )
     audit.record_event(
         session,
@@ -337,6 +432,7 @@ def regenerate_pipeline_report(
             "language": payload.language,
             "template": payload.template,
             "include_chart": payload.include_chart,
+            "outline": _normalized_outline(payload.outline),
         },
     )
     return {

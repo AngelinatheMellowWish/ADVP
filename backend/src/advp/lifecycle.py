@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from advp.live import MANAGER as LIVE_MANAGER
-from advp.models import ExportJob, PipelineRun, RenderJob
+from advp.models import ExportJob, ImportJob, PipelineRun, RenderJob
 
 ACTIVE_PIPELINE_STATUSES = ("pending", "running", "paused")
 ACTIVE_JOB_STATUSES = ("pending", "running")
@@ -23,17 +23,19 @@ class ActiveTasks:
 
     pipelines: int = 0
     exports: int = 0
+    imports: int = 0
     render_jobs: int = 0
     live_streams: int = 0
 
     @property
     def total(self) -> int:
-        return self.pipelines + self.exports + self.render_jobs + self.live_streams
+        return self.pipelines + self.exports + self.imports + self.render_jobs + self.live_streams
 
     def as_dict(self) -> dict[str, int]:
         return {
             "pipelines": self.pipelines,
             "exports": self.exports,
+            "imports": self.imports,
             "render_jobs": self.render_jobs,
             "live_streams": self.live_streams,
             "total": self.total,
@@ -98,6 +100,7 @@ def active_task_counts(session: Session) -> ActiveTasks:
     return ActiveTasks(
         pipelines=_count_statuses(session, PipelineRun, ACTIVE_PIPELINE_STATUSES),
         exports=_count_statuses(session, ExportJob, ACTIVE_JOB_STATUSES),
+        imports=_count_statuses(session, ImportJob, ACTIVE_JOB_STATUSES),
         render_jobs=_count_statuses(session, RenderJob, ACTIVE_JOB_STATUSES),
         live_streams=LIVE_MANAGER.active_count(),
     )
@@ -105,7 +108,7 @@ def active_task_counts(session: Session) -> ActiveTasks:
 
 def _count_statuses(
     session: Session,
-    model: type[PipelineRun] | type[ExportJob] | type[RenderJob],
+    model: type[PipelineRun] | type[ExportJob] | type[ImportJob] | type[RenderJob],
     statuses: tuple[str, ...],
 ) -> int:
     statement = select(func.count()).select_from(model).where(model.status.in_(statuses))

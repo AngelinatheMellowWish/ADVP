@@ -7,6 +7,7 @@ from typing import Any
 
 from advp import imaging as imaging_service
 from advp.config import get_settings
+from advp.eu2_settings import runtime_setting
 from advp.ingest.files import read_preview
 from advp.models import Dataset
 
@@ -93,14 +94,15 @@ def _points_payload(
             raise GeometryError("unknown_field", f"field {name!r} does not exist")
 
     settings = get_settings()
+    render_rows = int(runtime_setting(settings, "render_sample_rows"))
     rows = read_preview(
         dataset.source_path,
         dataset.options,
-        limit=settings.render_sample_rows,
+        limit=render_rows,
         offset=0,
         max_file_bytes=settings.max_file_bytes,
         schema=dataset.schema_json,
-        max_limit=settings.render_sample_rows,
+        max_limit=render_rows,
     )
     points: list[dict[str, Any]] = []
     for row in rows:

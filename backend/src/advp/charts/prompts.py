@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 from typing import Any, Literal
@@ -227,6 +228,36 @@ def build_dataset_context(
         },
         "analysis": profile.get("analysis"),
     }
+
+
+def apply_egress_policy(
+    context: dict[str, Any],
+    *,
+    egress_mode: str,
+    sample_rows: int,
+    preview: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Return a copy of the dataset context trimmed to the provider egress policy."""
+    payload = copy.deepcopy(context)
+    columns = payload.get("columns") or []
+    if egress_mode == "metadata":
+        for column in columns:
+            if isinstance(column, dict):
+                column.pop("samples", None)
+        payload.pop("preview", None)
+        return payload
+    limit = max(0, min(int(sample_rows), 100))
+    for column in columns:
+        if not isinstance(column, dict):
+            continue
+        samples = column.get("samples")
+        if isinstance(samples, list):
+            column["samples"] = list(samples[:limit])
+    if egress_mode == "full":
+        payload["preview"] = list(preview or [])
+    else:
+        payload.pop("preview", None)
+    return payload
 
 
 def validate_selection(

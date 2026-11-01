@@ -230,12 +230,14 @@ def dataset_summary(dataset: Dataset) -> dict[str, Any]:
 
 
 def dataset_detail(dataset: Dataset) -> dict[str, Any]:
+    options = dataset.options or {}
     return {
         **dataset_summary(dataset),
-        "options": dataset.options,
+        "options": options,
         "schema_definition": dataset.schema_json,
         "profile": dataset.profile_json,
         "preview": dataset.preview_json,
+        "ignored_issues": list(options.get("ignored_issues") or []),
     }
 
 
@@ -248,6 +250,7 @@ def project_summary(project: Project) -> dict[str, Any]:
         "created_at": project.created_at,
         "updated_at": project.updated_at,
         "dataset_count": len(project.datasets),
+        "source_types": sorted({dataset.format for dataset in project.datasets}),
     }
 
 

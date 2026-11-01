@@ -45,6 +45,8 @@ def create_provider(session: Session, payload: ProviderCreate) -> Provider:
         currency=payload.currency,
         priority=payload.priority,
         is_default=payload.is_default,
+        egress_mode=payload.egress_mode,
+        sample_rows=payload.sample_rows,
     )
     api_key = payload.api_key.get_secret_value() if payload.api_key is not None else None
     headers = payload.headers or {}
@@ -111,6 +113,10 @@ def update_provider(session: Session, provider: Provider, payload: ProviderUpdat
         provider.currency = payload.currency
     if payload.priority is not None:
         provider.priority = payload.priority
+    if payload.egress_mode is not None:
+        provider.egress_mode = payload.egress_mode
+    if payload.sample_rows is not None:
+        provider.sample_rows = payload.sample_rows
     if payload.is_default is True:
         session.execute(update(Provider).where(Provider.id != provider.id).values(is_default=False))
         provider.is_default = True

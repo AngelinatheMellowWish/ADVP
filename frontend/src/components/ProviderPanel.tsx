@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import { errorMessage } from '../api/projects'
 import {
@@ -9,6 +10,7 @@ import {
   listProviders,
   testProvider,
   updateProvider,
+  type EgressMode,
   type Provider,
   type ProviderKind,
   type ProviderTestResult,
@@ -32,6 +34,9 @@ type FormState = {
   currency: string
   priority: string
   is_default: boolean
+  egress_mode: EgressMode
+  sample_rows: string
+  confirm_full_data: boolean
   headers: string
   clear_key: boolean
   clear_headers: boolean
@@ -94,6 +99,9 @@ const EMPTY_FORM: FormState = {
   currency: 'USD',
   priority: '100',
   is_default: false,
+  egress_mode: 'sample',
+  sample_rows: '3',
+  confirm_full_data: false,
   headers: '',
   clear_key: false,
   clear_headers: false,
@@ -117,6 +125,9 @@ function providerToForm(provider: Provider): FormState {
     currency: provider.currency,
     priority: String(provider.priority),
     is_default: provider.is_default,
+    egress_mode: provider.egress_mode ?? 'sample',
+    sample_rows: String(provider.sample_rows ?? 3),
+    confirm_full_data: false,
     headers: '',
     clear_key: false,
     clear_headers: false,
@@ -135,6 +146,7 @@ function parseHeaders(value: string): Record<string, string> | undefined {
 }
 
 export function ProviderPanel() {
+  const { t } = useTranslation()
   const [providers, setProviders] = useState<Provider[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
@@ -255,6 +267,9 @@ export function ProviderPanel() {
         currency: form.currency.trim() || 'USD',
         priority: Number(form.priority),
         is_default: form.is_default,
+        egress_mode: form.egress_mode,
+        sample_rows: Number(form.sample_rows),
+        confirm_full_data: form.confirm_full_data,
       }
       if (selectedId) {
         await updateProvider(selectedId, {
@@ -438,6 +453,49 @@ export function ProviderPanel() {
               设为默认 Provider
             </label>
 
+            <fieldset className="egress-policy">
+              <legend>{t('providersPage.egress.title')}</legend>
+              <p className="muted">{t('providersPage.egress.hint')}</p>
+              <label>
+                {t('providersPage.egress.mode')}
+                <select
+                  className="input"
+                  value={form.egress_mode}
+                  onChange={(event) =>
+                    updateField('egress_mode', event.target.value as EgressMode)
+                  }
+                >
+                  <option value="metadata">{t('providersPage.egress.metadata')}</option>
+                  <option value="sample">{t('providersPage.egress.sample')}</option>
+                  <option value="full">{t('providersPage.egress.full')}</option>
+                </select>
+              </label>
+              <label>
+                {t('providersPage.egress.sampleRows')}
+                <input
+                  className="input"
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={form.sample_rows}
+                  disabled={form.egress_mode === 'metadata'}
+                  onChange={(event) => updateField('sample_rows', event.target.value)}
+                />
+              </label>
+              {form.egress_mode === 'full' ? (
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={form.confirm_full_data}
+                    onChange={(event) =>
+                      updateField('confirm_full_data', event.target.checked)
+                    }
+                  />
+                  {t('providersPage.egress.confirmFull')}
+                </label>
+              ) : null}
+            </fieldset>
+
             <details className="advanced-options">
               <summary>高级设置</summary>
               <div className="stack-form">
@@ -544,7 +602,11 @@ export function ProviderPanel() {
           </div>
 
           <div className="inline-form">
-            <button className="button" onClick={save} disabled={busy}>
+            <button
+              className="button"
+              onClick={save}
+              disabled={busy || (form.egress_mode === 'full' && !form.confirm_full_data)}
+            >
               保存
             </button>
             <button className="button" onClick={runTest} disabled={busy || !selectedId}>

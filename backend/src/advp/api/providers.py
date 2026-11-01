@@ -53,6 +53,18 @@ def _raise_provider(exc: ProviderError) -> NoReturn:
     )
 
 
+def _confirm_full_egress(egress_mode: str | None, confirmed: bool) -> None:
+    if egress_mode == "full" and not confirmed:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "egress_confirmation_required",
+                "message": "full-data egress requires explicit confirmation",
+                "hint": "set confirm_full_data=true after reviewing the data to be sent",
+            },
+        )
+
+
 @router.get("", response_model=list[ProviderSummary])
 def list_providers(session: DbSession) -> list[Provider]:
     return provider_service.list_providers(session)
@@ -60,6 +72,7 @@ def list_providers(session: DbSession) -> list[Provider]:
 
 @router.post("", response_model=ProviderSummary, status_code=201)
 def create_provider(payload: ProviderCreate, session: DbSession) -> Provider:
+    _confirm_full_egress(payload.egress_mode, payload.confirm_full_data)
     try:
         provider = provider_service.create_provider(session, payload)
     except credentials.CredentialError as exc:
@@ -86,6 +99,7 @@ def update_provider(
     session: DbSession,
 ) -> Provider:
     provider = _provider_or_404(session, provider_id)
+    _confirm_full_egress(payload.egress_mode, payload.confirm_full_data)
     try:
         updated = provider_service.update_provider(session, provider, payload)
     except credentials.CredentialError as exc:

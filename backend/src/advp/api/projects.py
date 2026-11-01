@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+from pathlib import Path
 from typing import NoReturn
 
 from fastapi import APIRouter, HTTPException, Response
 from sqlalchemy.orm import Session
 
-from advp import audit
+from advp import audit, search
 from advp.api.deps import DbSession
 from advp.api.schemas import (
     DatasetCreate,
@@ -20,6 +23,8 @@ from advp.api.schemas import (
     InspectResponse,
     KafkaImportRequest,
     ManifestResponse,
+    MultiFilePreviewResponse,
+    MultiFileRequest,
     ProjectCreate,
     ProjectDetail,
     ProjectSummary,
@@ -36,6 +41,7 @@ from advp.api.schemas import (
     WebTablesResponse,
 )
 from advp.config import get_settings
+from advp.ingest import multifile as multifile_service
 from advp.ingest.files import ImportOptions, IngestError, sha256_source
 from advp.ingest.sql import SqlError
 from advp.ingest.text_readers import read_text_document
@@ -92,9 +98,34 @@ def _project_or_404(session: Session, project_id: str) -> Project:
     return project
 
 
+def _reveal_in_file_manager(path: Path, select_file: bool) -> None:
+    if os.name != "nt":
+        raise HTTPException(
+            status_code=501,
+            detail={
+                "code": "reveal_unsupported",
+                "message": "opening a containing folder is only supported on Windows",
+            },
+        )
+    try:
+        if select_file:
+            subprocess.Popen(["explorer", "/select,", str(path)])
+        else:
+            os.startfile(str(path))
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "reveal_failed",
+                "message": "the containing folder could not be opened",
+            },
+        ) from exc
+
+
 @router.post("", response_model=ProjectDetail, status_code=201)
 def create_project(payload: ProjectCreate, session: DbSession) -> dict[str, object]:
     project = project_service.create_project(session, payload.name)
+    search.safe_index_project(session, project)
     return project_service.project_detail(project)
 
 
@@ -113,6 +144,22 @@ def get_project(project_id: str, session: DbSession) -> dict[str, object]:
     return project_service.project_detail(project, migration)
 
 
+@router.post("/{project_id}/reveal")
+def reveal_project(project_id: str, session: DbSession) -> dict[str, str]:
+    project = _project_or_404(session, project_id)
+    if project.datasets:
+        source = Path(project.datasets[0].source_path).expanduser()
+        if source.is_dir():
+            _reveal_in_file_manager(source, select_file=False)
+            return {"path": str(source)}
+        _reveal_in_file_manager(source, select_file=True)
+        return {"path": str(source.parent)}
+    target = get_settings().workspace_dir / "derived" / project.id
+    target.mkdir(parents=True, exist_ok=True)
+    _reveal_in_file_manager(target, select_file=False)
+    return {"path": str(target)}
+
+
 @router.patch("/{project_id}", response_model=ProjectDetail)
 def update_project(
     project_id: str,
@@ -123,6 +170,7 @@ def update_project(
     project = project_service.update_project(
         session, project, name=payload.name, archived=payload.archived
     )
+    search.safe_index_project(session, project)
     return project_service.project_detail(project)
 
 
@@ -139,6 +187,7 @@ def delete_project(project_id: str, session: DbSession) -> Response:
         target_id=project_id,
         detail={"name": project_name},
     )
+    search.safe_delete_project(project_id)
     return Response(status_code=204)
 
 
@@ -184,6 +233,56 @@ def create_dataset(
         )
     except IngestError as exc:
         _raise_ingest(exc)
+    search.safe_index_dataset(session, dataset)
+    return project_service.dataset_detail(dataset)
+
+
+@router.post("/{project_id}/multifile/preview", response_model=MultiFilePreviewResponse)
+def preview_multifile(
+    project_id: str,
+    payload: MultiFileRequest,
+    session: DbSession,
+) -> dict[str, object]:
+    _project_or_404(session, project_id)
+    try:
+        return multifile_service.preview_multifile(
+            payload.paths,
+            mode=payload.mode,
+            left_key=payload.left_key,
+            right_key=payload.right_key,
+            how=payload.how,
+            options=_options(payload.options),
+        )
+    except IngestError as exc:
+        _raise_ingest(exc)
+
+
+@router.post(
+    "/{project_id}/datasets/multifile",
+    response_model=DatasetDetail,
+    status_code=201,
+)
+def import_multifile(
+    project_id: str,
+    payload: MultiFileRequest,
+    session: DbSession,
+) -> dict[str, object]:
+    project = _project_or_404(session, project_id)
+    try:
+        dataset = multifile_service.import_multifile(
+            session,
+            project,
+            paths=payload.paths,
+            mode=payload.mode,
+            left_key=payload.left_key,
+            right_key=payload.right_key,
+            how=payload.how,
+            name=payload.name,
+            options=_options(payload.options),
+        )
+    except IngestError as exc:
+        _raise_ingest(exc)
+    search.safe_index_dataset(session, dataset)
     return project_service.dataset_detail(dataset)
 
 
@@ -205,6 +304,7 @@ def import_sql_dataset(
         )
     except SqlError as exc:
         _raise_sql(exc)
+    search.safe_index_dataset(session, dataset)
     return project_service.dataset_detail(dataset)
 
 
@@ -240,6 +340,7 @@ def import_document_dataset(
         )
     except IngestError as exc:
         _raise_ingest(exc)
+    search.safe_index_dataset(session, dataset)
     return project_service.dataset_detail(dataset)
 
 
@@ -353,6 +454,7 @@ def import_text_stats_dataset(
             "source_sha256": payload.source_sha256,
         },
     )
+    search.safe_index_dataset(session, dataset)
     return project_service.dataset_detail(dataset)
 
 
@@ -393,6 +495,7 @@ def import_web_dataset(
         )
     except IngestError as exc:
         _raise_ingest(exc)
+    search.safe_index_dataset(session, dataset)
     return project_service.dataset_detail(dataset)
 
 
@@ -416,6 +519,7 @@ def import_remote_dataset(
         )
     except IngestError as exc:
         _raise_ingest(exc)
+    search.safe_index_dataset(session, dataset)
     return project_service.dataset_detail(dataset)
 
 
@@ -444,6 +548,7 @@ def import_s3_dataset(
         )
     except IngestError as exc:
         _raise_ingest(exc)
+    search.safe_index_dataset(session, dataset)
     return project_service.dataset_detail(dataset)
 
 
@@ -472,6 +577,7 @@ def import_websocket_dataset(
         )
     except IngestError as exc:
         _raise_ingest(exc)
+    search.safe_index_dataset(session, dataset)
     return project_service.dataset_detail(dataset)
 
 
@@ -510,4 +616,5 @@ def import_kafka_dataset(
         )
     except IngestError as exc:
         _raise_ingest(exc)
+    search.safe_index_dataset(session, dataset)
     return project_service.dataset_detail(dataset)
