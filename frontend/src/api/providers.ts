@@ -1,6 +1,7 @@
 import { request } from './projects'
 
 export type ProviderKind = 'openai' | 'anthropic'
+export type EgressMode = 'metadata' | 'sample' | 'full'
 
 export type Provider = {
   id: string
@@ -19,6 +20,8 @@ export type Provider = {
   currency: string
   priority: number
   is_default: boolean
+  egress_mode: EgressMode
+  sample_rows: number
   key_last4: string | null
   has_key: boolean
   header_names: string[]
@@ -44,6 +47,9 @@ export type ProviderCreateInput = {
   currency?: string
   priority?: number
   is_default?: boolean
+  egress_mode?: EgressMode
+  sample_rows?: number
+  confirm_full_data?: boolean
 }
 
 export type ProviderUpdateInput = Partial<ProviderCreateInput> & {

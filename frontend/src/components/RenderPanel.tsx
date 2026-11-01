@@ -11,7 +11,17 @@ import {
   type RendererProbe,
 } from '../api/render3d'
 
-export function RenderPanel({ sceneId }: { sceneId: string }) {
+export function RenderPanel({
+  sceneId,
+  mode,
+  isovalue,
+  animation,
+}: {
+  sceneId: string
+  mode?: string
+  isovalue?: number
+  animation?: Record<string, unknown>
+}) {
   const [probe, setProbe] = useState<RendererProbe | null>(null)
   const [job, setJob] = useState<RenderJob | null>(null)
   const [busy, setBusy] = useState(false)
@@ -45,7 +55,15 @@ export function RenderPanel({ sceneId }: { sceneId: string }) {
     setBusy(true)
     setError(null)
     try {
-      setJob(await createRender(sceneId, { width: 1280, height: 720 }))
+      setJob(
+        await createRender(sceneId, {
+          width: 1280,
+          height: 720,
+          mode,
+          isovalue,
+          animation,
+        }),
+      )
     } catch (err) {
       setError(errorMessage(err))
     } finally {

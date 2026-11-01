@@ -56,11 +56,47 @@ export type CreatePipelineInput = {
   auto_start?: boolean
 }
 
+export type ReportSection =
+  | 'overview'
+  | 'quality'
+  | 'analysis'
+  | 'charts'
+  | 'pipeline'
+  | 'repro'
+  | 'conclusion'
+
+export const DEFAULT_REPORT_OUTLINE: ReportSection[] = [
+  'overview',
+  'quality',
+  'analysis',
+  'charts',
+  'pipeline',
+  'repro',
+  'conclusion',
+]
+
+export type ReportManifest = {
+  app_version: string
+  generated_at: string
+  run_id: string
+  project_id: string
+  dataset_id: string
+  dataset_name: string
+  source_sha256: string
+  chart_id: string | null
+  language: 'zh' | 'en'
+  template: 'standard' | 'compact'
+  outline: ReportSection[]
+  files: Record<string, string | null>
+  trace_url: string
+}
+
 export type ReportRegenerateInput = {
   language: 'zh' | 'en'
   template: 'standard' | 'compact'
   conclusion?: string | null
   include_chart?: boolean
+  outline?: ReportSection[]
 }
 
 export type ReportRegenerateResponse = {
@@ -115,6 +151,27 @@ export async function listPipelineRuns(
 
 export async function getPipelineRun(runId: string): Promise<PipelineRun> {
   return request<PipelineRun>(`/api/pipeline-runs/${runId}`)
+}
+
+export async function getReportManifest(runId: string): Promise<ReportManifest> {
+  return request<ReportManifest>(`/api/pipeline-runs/${runId}/report/manifest`)
+}
+
+export async function getReportMarkdown(runId: string): Promise<string> {
+  const response = await fetch(`/api/pipeline-runs/${runId}/report?format=md`)
+  if (!response.ok) throw new Error(`report unavailable (HTTP ${response.status})`)
+  return response.text()
+}
+
+export function reportDownloadUrl(
+  runId: string,
+  format: 'md' | 'html' | 'pdf',
+): string {
+  return `/api/pipeline-runs/${runId}/report?format=${format}`
+}
+
+export function reportPackageUrl(runId: string, includeDerived = false): string {
+  return `/api/pipeline-runs/${runId}/report/package?include_derived=${includeDerived}`
 }
 
 export async function pausePipelineRun(runId: string): Promise<PipelineRun> {

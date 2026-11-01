@@ -9,6 +9,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from advp.config import get_settings
+from advp.eu2_settings import runtime_setting
 from advp.models import LlmUsage, PipelineStep, Project
 
 DEFAULT_BUDGETS: dict[str, Any] = {
@@ -21,8 +23,10 @@ DEFAULT_BUDGETS: dict[str, Any] = {
 
 @dataclass(frozen=True, slots=True)
 class BudgetDecision:
+    global_limit: float | None
     project_limit: float | None
     monthly_limit: float | None
+    global_spend: float
     project_spend: float
     monthly_spend: float
     warning_ratio: float
@@ -32,9 +36,19 @@ class BudgetDecision:
     reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
+        levels = {
+            "global": _level(self.global_limit, self.global_spend, self.warning_ratio),
+            "project": _level(self.project_limit, self.project_spend, self.warning_ratio),
+            "monthly": _level(self.monthly_limit, self.monthly_spend, self.warning_ratio),
+        }
+        remaining = [
+            float(level["remaining"]) for level in levels.values() if level["limit"] is not None
+        ]
         return {
+            "global_limit": self.global_limit,
             "project_limit": self.project_limit,
             "monthly_limit": self.monthly_limit,
+            "global_spend": round(self.global_spend, 8),
             "project_spend": round(self.project_spend, 8),
             "monthly_spend": round(self.monthly_spend, 8),
             "warning_ratio": self.warning_ratio,
@@ -42,6 +56,8 @@ class BudgetDecision:
             "warning": self.warning,
             "exceeded": self.exceeded,
             "reason": self.reason,
+            "remaining": round(min(remaining), 8) if remaining else None,
+            **levels,
         }
 
 
@@ -77,12 +93,14 @@ def update_budgets(
 
 
 def check_budget(session: Session, project_id: str) -> BudgetDecision:
-    """Compute project and current-month spend against configured limits."""
+    """Compute global, project, and monthly spend against configured limits."""
     project = session.get(Project, project_id)
     if project is None:
         return BudgetDecision(
+            global_limit=None,
             project_limit=None,
             monthly_limit=None,
+            global_spend=0.0,
             project_spend=0.0,
             monthly_spend=0.0,
             warning_ratio=0.8,
@@ -91,33 +109,51 @@ def check_budget(session: Session, project_id: str) -> BudgetDecision:
             exceeded=False,
         )
     budgets = get_budgets(project)
-    rows = list(session.scalars(select(LlmUsage).where(LlmUsage.project_id == project_id)).all())
-    project_spend = sum(float(row.estimated_cost) for row in rows)
+    all_rows = list(session.scalars(select(LlmUsage)).all())
+    project_rows = [row for row in all_rows if row.project_id == project_id]
+    global_spend = sum(float(row.estimated_cost) for row in all_rows)
+    project_spend = sum(float(row.estimated_cost) for row in project_rows)
     month_start = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    monthly_spend = sum(
-        float(row.estimated_cost) for row in rows if _aware(row.created_at) >= month_start
+    global_month_spend = sum(
+        float(row.estimated_cost) for row in all_rows if _aware(row.created_at) >= month_start
     )
+    project_month_spend = sum(
+        float(row.estimated_cost) for row in project_rows if _aware(row.created_at) >= month_start
+    )
+    settings = get_settings()
+    global_limit = _optional_float(runtime_setting(settings, "global_budget"))
+    global_monthly_limit = _optional_float(runtime_setting(settings, "monthly_budget"))
     project_limit = _optional_float(budgets.get("project_limit"))
-    monthly_limit = _optional_float(budgets.get("monthly_limit"))
+    project_monthly_limit = _optional_float(budgets.get("monthly_limit"))
+    monthly_limit: float | None
+    monthly_spend: float
+    if project_monthly_limit is not None:
+        monthly_limit = project_monthly_limit
+        monthly_spend = project_month_spend
+    else:
+        monthly_limit = global_monthly_limit
+        monthly_spend = global_month_spend
     warning_ratio = _ratio(budgets.get("warning_ratio"))
-    exceeded = bool(
-        (project_limit is not None and project_spend >= project_limit)
-        or (monthly_limit is not None and monthly_spend >= monthly_limit)
+    global_level = _level(global_limit, global_spend, warning_ratio)
+    project_level = _level(project_limit, project_spend, warning_ratio)
+    monthly_level = _level(monthly_limit, monthly_spend, warning_ratio)
+    exceeded = any(
+        bool(level["exceeded"]) for level in (global_level, project_level, monthly_level)
     )
-    warning = bool(
-        not exceeded
-        and (
-            (project_limit is not None and project_spend >= project_limit * warning_ratio)
-            or (monthly_limit is not None and monthly_spend >= monthly_limit * warning_ratio)
-        )
-    )
+    warning = any(bool(level["warning"]) for level in (global_level, project_level, monthly_level))
     reason = None
     if exceeded:
-        project_exceeded = project_limit is not None and project_spend >= project_limit
-        reason = "project budget exceeded" if project_exceeded else "monthly budget exceeded"
+        if project_level["exceeded"]:
+            reason = "project budget exceeded"
+        elif monthly_level["exceeded"]:
+            reason = "monthly budget exceeded"
+        else:
+            reason = "global budget exceeded"
     return BudgetDecision(
+        global_limit=global_limit,
         project_limit=project_limit,
         monthly_limit=monthly_limit,
+        global_spend=global_spend,
         project_spend=project_spend,
         monthly_spend=monthly_spend,
         warning_ratio=warning_ratio,
@@ -252,6 +288,19 @@ def _accumulate(target: dict[str, dict[str, Any]], key: str, row: LlmUsage) -> N
 
 def _items(values: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(values.values(), key=lambda item: float(item["cost"]), reverse=True)
+
+
+def _level(limit: float | None, spend: float, warning_ratio: float) -> dict[str, Any]:
+    exceeded = bool(limit is not None and spend >= limit)
+    warning = bool(not exceeded and limit is not None and spend >= limit * warning_ratio)
+    remaining = None if limit is None else max(0.0, round(limit - spend, 8))
+    return {
+        "limit": limit,
+        "spend": round(spend, 8),
+        "remaining": remaining,
+        "warning": warning,
+        "exceeded": exceeded,
+    }
 
 
 def _optional_float(value: Any) -> float | None:

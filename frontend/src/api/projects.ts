@@ -6,6 +6,7 @@ export type ProjectSummary = {
   created_at: string
   updated_at: string
   dataset_count: number
+  source_types: string[]
 }
 
 export type DatasetSummary = {
@@ -126,6 +127,7 @@ export type DatasetDetail = DatasetSummary & {
   schema_definition: SchemaDefinition
   profile: Profile
   preview: Record<string, unknown>[]
+  ignored_issues: string[]
 }
 
 export type ProjectDetail = ProjectSummary & {
@@ -373,6 +375,20 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     credentials: 'same-origin',
     ...init,
   })
+  return parseResponse<T>(response)
+}
+
+export async function requestForm<T>(path: string, body: FormData): Promise<T> {
+  await ensureSession()
+  const response = await fetch(path, {
+    method: 'POST',
+    body,
+    credentials: 'same-origin',
+  })
+  return parseResponse<T>(response)
+}
+
+async function parseResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let detail: ErrorDetail | null = null
     try {
@@ -442,6 +458,12 @@ export async function updateProject(
 
 export async function deleteProject(projectId: string): Promise<void> {
   await request<void>(`/api/projects/${projectId}`, { method: 'DELETE' })
+}
+
+export async function revealProject(projectId: string): Promise<{ path: string }> {
+  return request<{ path: string }>(`/api/projects/${projectId}/reveal`, {
+    method: 'POST',
+  })
 }
 
 export async function inspectDataset(

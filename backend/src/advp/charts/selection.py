@@ -15,6 +15,7 @@ from advp.charts.prompts import (
     PROMPT_VERSION,
     SelectionOutput,
     SelectionValidationError,
+    apply_egress_policy,
     build_correction_messages,
     build_dataset_context,
     build_selection_messages,
@@ -110,10 +111,14 @@ def create_chart_selection(
     feedback: str | None = None
     limit = max(0, min(int(max_reselects), MAX_RESELECTS))
     for provider in providers:
+        state.context_payload["egress"] = {
+            "mode": provider.egress_mode,
+            "sample_rows": provider.sample_rows,
+        }
         while True:
             state.attempts += 1
             messages = build_selection_messages(
-                context_payload=state.context_payload,
+                context_payload=_egress_context(state.context_payload, provider, dataset),
                 candidates=state.candidates_payload,
                 intent=intent,
                 feedback=feedback,
@@ -215,8 +220,12 @@ def correct_chart_selection(
     last_error: str | None = None
     for provider in providers:
         state.attempts += 1
+        state.context_payload["egress"] = {
+            "mode": provider.egress_mode,
+            "sample_rows": provider.sample_rows,
+        }
         messages = build_correction_messages(
-            context_payload=state.context_payload,
+            context_payload=_egress_context(state.context_payload, provider, dataset),
             candidates=state.candidates_payload,
             intent=intent,
             previous=previous,
@@ -372,6 +381,19 @@ def _prepare_state(dataset: Dataset, intent: ChartIntent | None) -> _SelectionSt
 
 def _candidate_list(state: _SelectionState) -> list[Candidate]:
     return [item.candidate for item in state.scored]
+
+
+def _egress_context(
+    context_payload: dict[str, Any],
+    provider: Provider,
+    dataset: Dataset,
+) -> dict[str, Any]:
+    return apply_egress_policy(
+        context_payload,
+        egress_mode=provider.egress_mode,
+        sample_rows=provider.sample_rows,
+        preview=dataset.preview_json,
+    )
 
 
 def _ordered_providers(session: Session, provider_id: str | None) -> list[Provider]:

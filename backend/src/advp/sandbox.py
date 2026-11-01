@@ -15,6 +15,7 @@ import uuid
 from dataclasses import dataclass, field
 
 from advp.config import get_settings
+from advp.eu2_settings import runtime_setting
 
 BOOTSTRAP = r"""
 import os
@@ -143,11 +144,13 @@ class SandboxResult:
 def run_python(
     code: str,
     *,
-    timeout: float = 30.0,
+    timeout: float | None = None,
     max_output: int = 20_000,
 ) -> SandboxResult:
     """Run Python code in a restricted child process."""
     settings = get_settings()
+    if timeout is None:
+        timeout = float(runtime_setting(settings, "sandbox_timeout_seconds"))
     workdir = settings.workspace_dir / "sandbox" / uuid.uuid4().hex
     workdir.mkdir(parents=True, exist_ok=True)
     script = workdir / "main.py"

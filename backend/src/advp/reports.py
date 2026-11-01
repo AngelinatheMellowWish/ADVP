@@ -5,9 +5,14 @@ from __future__ import annotations
 import html
 import json
 import re
+import zipfile
 from datetime import UTC, datetime
+from importlib import metadata
 from pathlib import Path
 from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from advp import __version__
 from advp.config import get_settings
@@ -15,6 +20,17 @@ from advp.models import ChartSelection, Dataset, PipelineRun, PipelineStep
 
 LANGUAGES = {"zh", "en"}
 TEMPLATES = {"standard", "compact"}
+DEFAULT_OUTLINE = [
+    "overview",
+    "quality",
+    "analysis",
+    "charts",
+    "pipeline",
+    "repro",
+    "conclusion",
+]
+REPORT_SECTIONS = [*DEFAULT_OUTLINE, "appendix"]
+_REQUIREMENTS_PACKAGES = ("advp-backend", "polars", "pandas", "plotly", "numpy", "pyarrow")
 TEXT: dict[str, dict[str, str]] = {
     "zh": {
         "title": "ADVP 分析报告",
@@ -159,6 +175,23 @@ TEXT: dict[str, dict[str, str]] = {
 }
 
 
+def normalize_outline(outline: list[str] | None) -> list[str]:
+    """Validate and return the ordered top-level report sections."""
+    if outline is None:
+        return list(DEFAULT_OUTLINE)
+    ordered: list[str] = []
+    for raw in outline:
+        key = str(raw).strip()
+        if key == "appendix":
+            continue
+        if key not in DEFAULT_OUTLINE:
+            raise ValueError(f"unknown report section: {key}")
+        if key in ordered:
+            raise ValueError(f"duplicate report section: {key}")
+        ordered.append(key)
+    return ordered or list(DEFAULT_OUTLINE)
+
+
 def report_directory(run: PipelineRun) -> Path:
     """Return the report output directory for a run."""
     directory = get_settings().workspace_dir / "exports" / run.project_id
@@ -178,8 +211,10 @@ def write_report_bundle(
     conclusion: str | None = None,
     chart_image: Path | None = None,
     chart_note: str | None = None,
+    outline: list[str] | None = None,
 ) -> dict[str, Any]:
     """Write Markdown, HTML, and manifest files and return their paths and sizes."""
+    normalized_outline = normalize_outline(outline)
     directory = report_directory(run)
     markdown = build_report(
         dataset,
@@ -192,6 +227,7 @@ def write_report_bundle(
         conclusion=conclusion,
         chart_image=chart_image.name if chart_image else None,
         chart_note=chart_note,
+        outline=normalized_outline,
     )
     md_path = directory / f"report_{run.id}.md"
     html_path = directory / f"report_{run.id}.html"
@@ -214,10 +250,12 @@ def write_report_bundle(
         "prompt_version": selection.prompt_version if selection else None,
         "language": language,
         "template": template,
+        "outline": normalized_outline,
         "custom_conclusion": bool(conclusion and conclusion.strip()),
         "parameters": {
             "report_language": language,
             "report_template": template,
+            "report_outline": normalized_outline,
             "report_include_chart": chart_image is not None,
         },
         "files": {
@@ -258,6 +296,225 @@ def write_report(
     return Path(write_report_bundle(dataset, run, prior, selection, steps, **kwargs)["md_path"])
 
 
+def build_reproducible_package(
+    session: Session,
+    run: PipelineRun,
+    *,
+    include_derived: bool = False,
+    outline: list[str] | None = None,
+) -> dict[str, Any]:
+    """Write a reproducible zip with script, notebook, manifest, and data hashes."""
+    normalized_outline = normalize_outline(outline)
+    steps = list(
+        session.scalars(
+            select(PipelineStep)
+            .where(PipelineStep.run_id == run.id)
+            .order_by(PipelineStep.position)
+        ).all()
+    )
+    working_id = str(run.options.get("working_dataset_id") or run.dataset_id)
+    dataset = session.get(Dataset, working_id)
+    if dataset is None:
+        raise ValueError("working dataset was not found")
+    selection_id = next(
+        (
+            (step.output_json or {}).get("selection_id")
+            for step in steps
+            if step.key == "selection" and step.status == "succeeded"
+        ),
+        None,
+    )
+    selection = session.get(ChartSelection, str(selection_id)) if selection_id else None
+    prior = {step.key: step.output_json for step in steps if step.status == "succeeded"}
+    language = str(run.options.get("report_language") or "zh")
+    template = str(run.options.get("report_template") or "standard")
+    directory = report_directory(run)
+    script = _build_run_script(dataset, run, selection, normalized_outline)
+    notebook = _build_notebook(script)
+    report_step = next((step for step in steps if step.key == "report"), None)
+    report_output = (report_step.output_json or {}) if report_step is not None else {}
+    report_path = Path(str(report_output.get("path") or ""))
+    if report_path.is_file():
+        report_markdown = report_path.read_text(encoding="utf-8")
+    else:
+        report_markdown = build_report(
+            dataset,
+            run,
+            prior,
+            selection,
+            steps,
+            language=language,
+            template=template,
+            outline=normalized_outline,
+        )
+    files: dict[str, str | bytes] = {
+        "run.py": script,
+        "report.ipynb": json.dumps(notebook, ensure_ascii=False, indent=2),
+        "requirements.lock": _requirements_lock(),
+        "data.json": json.dumps(
+            _package_data(dataset, run, include_derived=include_derived),
+            ensure_ascii=False,
+            indent=2,
+        ),
+        "report.md": report_markdown,
+    }
+    if selection is not None:
+        files["chart.json"] = json.dumps(selection.result_json or {}, ensure_ascii=False, indent=2)
+    derived_files: list[str] = []
+    if include_derived:
+        derived = _derived_payload(dataset)
+        for name, content in derived.items():
+            files[name] = content
+            derived_files.append(name)
+    manifest = {
+        "app_version": __version__,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "run_id": run.id,
+        "project_id": run.project_id,
+        "dataset_id": dataset.id,
+        "dataset_name": dataset.name,
+        "source_sha256": dataset.source_sha256,
+        "selection_id": selection.id if selection is not None else None,
+        "chart_id": (selection.selected_chart_id if selection is not None else None),
+        "language": language,
+        "template": template,
+        "outline": normalized_outline,
+        "includes_raw_data": False,
+        "includes_derived": include_derived,
+        "files": sorted([*files, "manifest.json"]),
+        "derived_files": sorted(derived_files),
+        "privacy": (
+            "Raw source data is never copied into this package. Derived files and "
+            "preview samples are included only when explicitly requested."
+        ),
+    }
+    files["manifest.json"] = json.dumps(manifest, ensure_ascii=False, indent=2)
+    zip_path = directory / f"repro_{run.id}.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, payload in files.items():
+            data = payload.encode("utf-8") if isinstance(payload, str) else payload
+            archive.writestr(name, data)
+    return {
+        "path": str(zip_path),
+        "filename": zip_path.name,
+        "bytes": zip_path.stat().st_size,
+        "manifest": manifest,
+    }
+
+
+def _build_run_script(
+    dataset: Dataset,
+    run: PipelineRun,
+    selection: ChartSelection | None,
+    outline: list[str],
+) -> str:
+    config = {
+        "run_id": run.id,
+        "project_id": run.project_id,
+        "dataset_id": dataset.id,
+        "dataset_name": dataset.name,
+        "source_format": dataset.format,
+        "source_sha256": dataset.source_sha256,
+        "chart_id": selection.selected_chart_id if selection is not None else None,
+        "selection": (selection.result_json or {}).get("selected")
+        if selection is not None
+        else None,
+        "outline": outline,
+    }
+    return (
+        '"""ADVP reproducible run.\n\n'
+        "Generated by ADVP. The original source file is not embedded; verify the\n"
+        "SHA-256 in data.json before rerunning against your local copy.\n"
+        '"""\n\n'
+        "from __future__ import annotations\n\n"
+        "import json\n"
+        "from pathlib import Path\n\n"
+        f"RUN = json.loads(r'''{json.dumps(config, ensure_ascii=False, indent=2)}''')\n"
+        "DATA = json.loads(Path('data.json').read_text(encoding='utf-8'))\n\n\n"
+        "def main() -> None:\n"
+        "    print(f\"ADVP run {RUN['run_id']} on {RUN['dataset_name']}\")\n"
+        "    print(f\"Source SHA-256: {RUN['source_sha256']}\")\n"
+        "    print(f\"Chart: {RUN['chart_id'] or 'rule fallback'}\")\n"
+        "    print('Load the source file from DATA[\"source_path\"] with pandas or polars,')\n"
+        "    print('then apply the chart configuration in chart.json.')\n\n\n"
+        "if __name__ == '__main__':\n"
+        "    main()\n"
+    )
+
+
+def _build_notebook(script: str) -> dict[str, Any]:
+    return {
+        "cells": [
+            {
+                "cell_type": "code",
+                "execution_count": None,
+                "metadata": {},
+                "outputs": [],
+                "source": script.splitlines(keepends=True),
+            }
+        ],
+        "metadata": {
+            "kernelspec": {
+                "display_name": "Python 3",
+                "language": "python",
+                "name": "python3",
+            },
+            "language_info": {"name": "python", "version": "3.12"},
+        },
+        "nbformat": 4,
+        "nbformat_minor": 5,
+    }
+
+
+def _requirements_lock() -> str:
+    lines = ["# ADVP reproducible package; versions captured on export."]
+    for name in _REQUIREMENTS_PACKAGES:
+        try:
+            version = metadata.version(name)
+        except metadata.PackageNotFoundError:
+            continue
+        lines.append(f"{name}=={version}")
+    return "\n".join(lines) + "\n"
+
+
+def _package_data(dataset: Dataset, run: PipelineRun, *, include_derived: bool) -> dict[str, Any]:
+    return {
+        "run_id": run.id,
+        "project_id": run.project_id,
+        "dataset_id": dataset.id,
+        "dataset_name": dataset.name,
+        "kind": dataset.kind,
+        "format": dataset.format,
+        "source_path": dataset.source_path,
+        "source_sha256": dataset.source_sha256,
+        "source_size": dataset.source_size,
+        "row_count": dataset.row_count,
+        "column_count": dataset.column_count,
+        "sampled": dataset.sampled,
+        "options": dataset.options,
+        "includes_derived_copy": include_derived,
+        "raw_data_embedded": False,
+    }
+
+
+def _derived_payload(dataset: Dataset) -> dict[str, bytes]:
+    settings = get_settings()
+    payload: dict[str, bytes] = {}
+    source = Path(dataset.source_path)
+    try:
+        source.resolve().relative_to(settings.workspace_dir.resolve())
+    except (OSError, ValueError):
+        source = Path()
+    if source.is_file():
+        payload[f"derived/{source.name}"] = source.read_bytes()
+    rows = list(dataset.preview_json or [])
+    if rows:
+        payload["samples/preview.json"] = json.dumps(rows, ensure_ascii=False, indent=2).encode(
+            "utf-8"
+        )
+    return payload
+
+
 def build_report(
     dataset: Dataset,
     run: PipelineRun,
@@ -270,8 +527,10 @@ def build_report(
     conclusion: str | None = None,
     chart_image: str | None = None,
     chart_note: str | None = None,
+    outline: list[str] | None = None,
 ) -> str:
     """Build a Markdown report with profile, analysis, selection, and lineage."""
+    normalized_outline = normalize_outline(outline)
     lang = language if language in LANGUAGES else "zh"
     mode = template if template in TEMPLATES else "standard"
     text = TEXT[lang]
@@ -386,7 +645,44 @@ def build_report(
         conclusion.strip() if conclusion and conclusion.strip() else text["default_conclusion"]
     )
     lines.append("")
+    if normalized_outline != DEFAULT_OUTLINE:
+        lines = _reorder_sections(lines, normalized_outline)
     return "\n".join(lines)
+
+
+def _reorder_sections(lines: list[str], outline: list[str]) -> list[str]:
+    """Reorder and renumber top-level ``##`` sections by outline keys."""
+    preamble: list[str] = []
+    sections: dict[str, list[str]] = {}
+    current: str | None = None
+    section_index = 0
+    for line in lines:
+        if line.startswith("## ") and not line.startswith("## 6.1 "):
+            if section_index < len(DEFAULT_OUTLINE):
+                current = DEFAULT_OUTLINE[section_index]
+                sections.setdefault(current, []).append(line)
+                section_index += 1
+            else:
+                current = None
+                preamble.append(line)
+            continue
+        if current is None:
+            preamble.append(line)
+        else:
+            sections[current].append(line)
+    rebuilt = list(preamble)
+    for index, key in enumerate(outline, start=1):
+        section = sections.get(key)
+        if not section:
+            continue
+        heading, *body = section
+        title = heading.split(". ", 1)[-1] if ". " in heading else heading[3:]
+        rebuilt.append(f"## {index}. {title}")
+        rebuilt.extend(
+            re.sub(r"^## 6\.1 ", f"## {index}.1 ", line) if line.startswith("## 6.1 ") else line
+            for line in body
+        )
+    return rebuilt
 
 
 def build_report_html(markdown: str, *, language: str = "zh") -> str:
