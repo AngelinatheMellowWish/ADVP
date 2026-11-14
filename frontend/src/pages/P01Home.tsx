@@ -1,4 +1,10 @@
-import { useEffect, useState, type FormEvent, type KeyboardEvent } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 
@@ -6,14 +12,81 @@ import {
   createProject,
   errorMessage,
   listProjects,
+  request,
   type ProjectSummary,
 } from '../api/projects'
 import { getSystemStatus, type SystemStatus } from '../api/system'
 import { ProjectCard } from '../components/ProjectCard'
 import { SystemStatusCard } from '../components/SystemStatusCard'
 
+type AuditEventItem = {
+  id: string
+  project_id?: string | null
+  event: string
+  target_type?: string | null
+  target_id?: string | null
+  detail?: unknown
+  created_at: string
+}
+
+type ActivityFilter = 'all' | 'tasks' | 'activity'
+
+type ActivityEntry = {
+  id: string
+  kind: 'task' | 'activity'
+  title: string
+  detail: string | null
+  status: string
+  createdAt: string
+}
+
+const TASK_KIND_KEYS: Record<string, string> = {
+  import: 'home.recentActivity.taskKinds.import',
+  pipeline: 'home.recentActivity.taskKinds.pipeline',
+  export: 'home.recentActivity.taskKinds.export',
+  render: 'home.recentActivity.taskKinds.render',
+  live: 'home.recentActivity.taskKinds.live',
+}
+
+const ACTIVITY_FILTERS: ActivityFilter[] = ['all', 'tasks', 'activity']
+
+function timestampOf(value: string): number {
+  const timestamp = new Date(value).getTime()
+  return Number.isNaN(timestamp) ? 0 : timestamp
+}
+
+function humanize(value: string): string {
+  const words = value.replace(/[_-]+/g, ' ').trim()
+  return words ? `${words.charAt(0).toUpperCase()}${words.slice(1)}` : value
+}
+
+function activityStatus(event: string): string {
+  if (/failed|error/.test(event)) return 'failed'
+  if (/cancel/.test(event)) return 'cancelled'
+  if (/skip/.test(event)) return 'skipped'
+  if (/pause|degrad/.test(event)) return 'paused'
+  return 'recorded'
+}
+
+function statusTone(status: string): string {
+  if (status === 'succeeded' || status === 'running') return 'ok'
+  if (status === 'failed' || status === 'error') return 'error'
+  if (status === 'pending' || status === 'paused') return 'warning'
+  return 'muted'
+}
+
+function formatActivityTime(value: string, language: string): string | null {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return new Intl.DateTimeFormat(language, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date)
+}
+
 export function P01Home() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [projectsLoading, setProjectsLoading] = useState(true)
@@ -27,6 +100,9 @@ export function P01Home() {
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  const [auditEvents, setAuditEvents] = useState<AuditEventItem[]>([])
+  const [activityFilter, setActivityFilter] = useState<ActivityFilter>('all')
+  const [activityDialogOpen, setActivityDialogOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -72,12 +148,90 @@ export function P01Home() {
     return () => controller.abort()
   }, [statusReload])
 
+  useEffect(() => {
+    let cancelled = false
+    request<AuditEventItem[]>('/api/audit/events?limit=20')
+      .then((data) => {
+        if (cancelled) return
+        setAuditEvents(Array.isArray(data) ? data : [])
+      })
+      .catch(() => {
+        if (!cancelled) setAuditEvents([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const activeProject = useMemo(() => {
+    const candidates = projects
+      .filter((project) => !project.archived)
+      .sort((left, right) => timestampOf(right.updated_at) - timestampOf(left.updated_at))
+    return candidates[0] ?? null
+  }, [projects])
+
+  const recentActivity = useMemo(() => {
+    const entries: ActivityEntry[] = []
+    const tasks = status?.recent_tasks ?? {}
+    Object.entries(tasks).forEach(([, items]) => {
+      if (!Array.isArray(items)) return
+      items.forEach((item) => {
+        if (!item || typeof item !== 'object') return
+        const kind = String(item.kind ?? '')
+        const titleKey = TASK_KIND_KEYS[kind]
+        entries.push({
+          id: `task-${item.id}`,
+          kind: 'task',
+          title: titleKey ? t(titleKey) : humanize(kind || 'task'),
+          detail: item.id ? `#${String(item.id).slice(0, 8)}` : null,
+          status: String(item.status ?? 'pending'),
+          createdAt: String(item.created_at ?? ''),
+        })
+      })
+    })
+    auditEvents.forEach((event) => {
+      entries.push({
+        id: `activity-${event.id}`,
+        kind: 'activity',
+        title: t(`home.recentActivity.events.${event.event}`, {
+          defaultValue: humanize(event.event),
+        }),
+        detail: event.target_type
+          ? t(`home.recentActivity.targets.${event.target_type}`, {
+              defaultValue: humanize(event.target_type),
+            })
+          : null,
+        status: activityStatus(event.event),
+        createdAt: event.created_at,
+      })
+    })
+    return entries.sort(
+      (left, right) => timestampOf(right.createdAt) - timestampOf(left.createdAt),
+    )
+  }, [auditEvents, status, t])
+
+  const filteredActivity = useMemo(() => {
+    if (activityFilter === 'all') return recentActivity
+    const targetKind = activityFilter === 'tasks' ? 'task' : 'activity'
+    return recentActivity.filter((entry) => entry.kind === targetKind)
+  }, [activityFilter, recentActivity])
+
+  const previewActivity = filteredActivity.slice(0, 4)
+
   function refreshProjects() {
     setProjectsReload((value) => value + 1)
   }
 
   function refreshStatus() {
     setStatusReload((value) => value + 1)
+  }
+
+  function openImport() {
+    if (!activeProject) {
+      openNewProject()
+      return
+    }
+    navigate(`/projects/${encodeURIComponent(activeProject.id)}/import`)
   }
 
   function openNewProject() {
@@ -89,6 +243,17 @@ export function P01Home() {
   function closeNewProject() {
     if (creating) return
     setDialogOpen(false)
+  }
+
+  function closeActivityDialog() {
+    setActivityDialogOpen(false)
+  }
+
+  function handleActivityDialogKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === 'Escape') {
+      event.stopPropagation()
+      closeActivityDialog()
+    }
   }
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
@@ -118,6 +283,48 @@ export function P01Home() {
     }
   }
 
+  function renderActivityList(entries: ActivityEntry[], testId: string) {
+    if (entries.length === 0) {
+      return (
+        <p className="muted">
+          {recentActivity.length === 0
+            ? t('home.recentActivity.empty')
+            : t('home.recentActivity.emptyFiltered')}
+        </p>
+      )
+    }
+    return (
+      <ul className="home-activity-list" data-testid={testId}>
+        {entries.map((entry) => {
+          const time = formatActivityTime(entry.createdAt, i18n.language)
+          return (
+            <li className="home-activity-item" key={entry.id}>
+              <div className="home-activity-main">
+                <span className="home-activity-title">{entry.title}</span>
+                {entry.detail ? (
+                  <span className="home-hint">{entry.detail}</span>
+                ) : null}
+                {time ? (
+                  <time className="home-hint" dateTime={entry.createdAt}>
+                    {time}
+                  </time>
+                ) : null}
+              </div>
+              <span
+                className={`status-pill status-pill-${statusTone(entry.status)}`}
+                data-status={entry.status}
+              >
+                {t(`home.recentActivity.statuses.${entry.status}`, {
+                  defaultValue: humanize(entry.status),
+                })}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+    )
+  }
+
   return (
     <section className="home-page" data-testid="page-p01">
       <header className="home-hero">
@@ -127,6 +334,9 @@ export function P01Home() {
           <p className="home-lede">{t('home.welcomeDescription')}</p>
         </div>
         <div className="home-hero-actions">
+          <button className="btn" type="button" onClick={openImport}>
+            {t('home.importData')}
+          </button>
           <button className="btn home-primary" type="button" onClick={openNewProject}>
             {t('home.newProject.open')}
           </button>
@@ -188,9 +398,42 @@ export function P01Home() {
             </div>
           </section>
 
-          <section className="card" aria-labelledby="home-recent-tasks-title">
-            <h2 id="home-recent-tasks-title">{t('home.recentTasks.title')}</h2>
-            <p className="muted">{t('home.recentTasks.empty')}</p>
+          <section
+            className="card home-recent-activity"
+            aria-labelledby="home-recent-activity-title"
+            data-testid="home-recent-activity"
+          >
+            <div className="home-section-head">
+              <h2 id="home-recent-activity-title">
+                {t('home.recentActivity.title')}
+              </h2>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => setActivityDialogOpen(true)}
+                disabled={recentActivity.length === 0}
+              >
+                {t('home.recentActivity.viewAll')}
+              </button>
+            </div>
+            <div
+              className="home-activity-filters"
+              role="group"
+              aria-label={t('home.recentActivity.filtersLabel')}
+            >
+              {ACTIVITY_FILTERS.map((filter) => (
+                <button
+                  className="btn"
+                  type="button"
+                  key={filter}
+                  aria-pressed={activityFilter === filter}
+                  onClick={() => setActivityFilter(filter)}
+                >
+                  {t(`home.recentActivity.filters.${filter}`)}
+                </button>
+              ))}
+            </div>
+            {renderActivityList(previewActivity, 'home-activity-list')}
           </section>
         </div>
 
@@ -253,6 +496,33 @@ export function P01Home() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      ) : null}
+
+      {activityDialogOpen ? (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeActivityDialog()
+          }}
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="home-all-activity-title"
+            onKeyDown={handleActivityDialogKeyDown}
+          >
+            <div className="home-section-head">
+              <h2 id="home-all-activity-title">
+                {t('home.recentActivity.allTitle')}
+              </h2>
+              <button className="btn" type="button" onClick={closeActivityDialog}>
+                {t('common.close')}
+              </button>
+            </div>
+            {renderActivityList(filteredActivity, 'home-all-activity-list')}
           </div>
         </div>
       ) : null}

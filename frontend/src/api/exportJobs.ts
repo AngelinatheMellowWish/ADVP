@@ -36,6 +36,23 @@ export async function createSelectionExport(
   })
 }
 
+export async function listExportJobs(params: {
+  projectId?: string
+  runId?: string
+  kind?: 'report' | 'selection'
+  limit?: number
+  offset?: number
+}): Promise<ExportJob[]> {
+  const query = new URLSearchParams()
+  if (params.projectId) query.set('project_id', params.projectId)
+  if (params.runId) query.set('run_id', params.runId)
+  if (params.kind) query.set('kind', params.kind)
+  if (params.limit) query.set('limit', String(params.limit))
+  if (params.offset) query.set('offset', String(params.offset))
+  const result = await request<{ jobs: ExportJob[] }>(`/api/export-jobs?${query}`)
+  return result.jobs
+}
+
 export async function getExportJob(jobId: string): Promise<ExportJob> {
   return request<ExportJob>(`/api/export-jobs/${jobId}`)
 }

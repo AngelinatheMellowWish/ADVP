@@ -620,6 +620,54 @@ export function P04Pipeline() {
           </section>
 
           {selection ? (
+            <section
+              className="card"
+              data-testid="pipeline-budget-card"
+              aria-label={t('pipelinePage.budgetCard')}
+            >
+              <h2>{t('pipelinePage.budgetCard')}</h2>
+              {selection.budget ? (
+                <>
+                  <p className="muted">
+                    {t('pipelinePage.budgetSource')}:{' '}
+                    {selection.budget.project_limit != null
+                      ? t('pipelinePage.budgetProject')
+                      : selection.budget.monthly_limit != null
+                        ? t('pipelinePage.budgetMonthly')
+                        : t('pipelinePage.budgetGlobal')}
+                  </p>
+                  <p className="muted">
+                    {t('pipelinePage.budgetRemaining')}:{' '}
+                    {selection.budget.project_limit != null
+                      ? (
+                          selection.budget.project_limit - selection.budget.project_spend
+                        ).toFixed(2)
+                      : selection.budget.monthly_limit != null
+                        ? (
+                            selection.budget.monthly_limit - selection.budget.monthly_spend
+                          ).toFixed(2)
+                        : '—'}{' '}
+                    {selection.budget.currency}
+                  </p>
+                  {selection.budget.reason ? (
+                    <p className="notice">
+                      {t('pipelinePage.budgetReason')}: {selection.budget.reason}
+                    </p>
+                  ) : null}
+                </>
+              ) : (
+                <p className="muted">{t('pipelinePage.budgetNone')}</p>
+              )}
+              <p className={selection.degraded ? 'notice' : 'muted'}>
+                {t('pipelinePage.degraded')}:{' '}
+                {selection.degraded
+                  ? (selection.degradation_reason ?? '—')
+                  : t('pipelinePage.notDegraded')}
+              </p>
+            </section>
+          ) : null}
+
+          {selection ? (
             <section className="card" aria-label={t('pipelinePage.selectionCard')}>
               <h2>{t('pipelinePage.selectionCard')}</h2>
               <p>

@@ -16,7 +16,9 @@ from advp.api.schemas import (
     ProviderTestResponse,
     ProviderUpdate,
     ProviderUsageRecord,
+    ProviderUsageSummary,
 )
+from advp.costs import provider_usage_summary
 from advp.llm import credentials
 from advp.llm import providers as provider_service
 from advp.llm.client import ProviderError
@@ -114,6 +116,33 @@ def update_provider(
     return updated
 
 
+@router.delete("/credentials")
+def clear_provider_credentials(
+    session: DbSession,
+    confirm: bool = Query(default=False),
+) -> dict[str, int]:
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "confirmation_required",
+                "message": "clearing provider credentials requires explicit confirmation",
+                "hint": "review the impact and retry with confirm=true",
+            },
+        )
+    try:
+        cleared = provider_service.clear_provider_credentials(session)
+    except credentials.CredentialError as exc:
+        _raise_credential(exc)
+    audit.record_event(
+        session,
+        "provider_credentials_cleared",
+        target_type="provider",
+        detail={"cleared": cleared},
+    )
+    return {"cleared": cleared}
+
+
 @router.delete("/{provider_id}", status_code=204)
 def delete_provider(provider_id: str, session: DbSession) -> Response:
     provider = _provider_or_404(session, provider_id)
@@ -159,6 +188,16 @@ def list_models(provider_id: str, session: DbSession) -> dict[str, object]:
     except ProviderError as exc:
         _raise_provider(exc)
     return {"models": result.models, "latency_ms": result.latency_ms}
+
+
+@router.get("/{provider_id}/usage/summary", response_model=ProviderUsageSummary)
+def usage_summary(
+    provider_id: str,
+    session: DbSession,
+    days: int = Query(default=7, ge=1, le=90),
+) -> dict[str, object]:
+    _provider_or_404(session, provider_id)
+    return provider_usage_summary(session, provider_id, days=days)
 
 
 @router.get("/{provider_id}/usage", response_model=list[ProviderUsageRecord])

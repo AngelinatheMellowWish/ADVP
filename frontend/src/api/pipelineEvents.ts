@@ -1,3 +1,5 @@
+import { request } from './projects'
+
 export type PipelineEvent = {
   id: string
   run_id: string
@@ -19,6 +21,15 @@ export const PIPELINE_EVENT_TYPES = [
 ] as const
 
 export type PipelineEventType = (typeof PIPELINE_EVENT_TYPES)[number]
+
+export async function listPipelineEvents(
+  runId: string,
+  limit = 2000,
+): Promise<PipelineEvent[]> {
+  return request<PipelineEvent[]>(
+    `/api/pipeline-runs/${encodeURIComponent(runId)}/events?format=json&limit=${limit}`,
+  )
+}
 
 export function subscribePipelineEvents(
   runId: string,

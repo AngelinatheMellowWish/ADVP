@@ -5,6 +5,7 @@ from __future__ import annotations
 import codecs
 import csv
 import hashlib
+import io
 import math
 import re
 from dataclasses import dataclass, field
@@ -33,6 +34,26 @@ FORMAT_BY_SUFFIX = {
 NULL_VALUES = ["", "NA", "N/A", "null", "NULL", "None", "none"]
 NUMERIC_INT = re.compile(r"^[+-]?\d+$")
 NUMERIC_FLOAT = re.compile(r"^[+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?$")
+TYPE_OVERRIDE_ALIASES = {
+    "int": "int",
+    "integer": "int",
+    "float": "float",
+    "double": "float",
+    "str": "string",
+    "string": "string",
+    "bool": "bool",
+    "boolean": "bool",
+    "date": "date",
+    "datetime": "datetime",
+}
+TYPE_OVERRIDE_POLARS = {
+    "int": pl.Int64,
+    "float": pl.Float64,
+    "string": pl.String,
+    "bool": pl.Boolean,
+    "date": pl.Date,
+    "datetime": pl.Datetime,
+}
 
 
 class IngestError(Exception):
@@ -76,6 +97,136 @@ class SourceChangedError(IngestError):
     status_code = 409
 
 
+class InvalidTypeOverrideError(IngestError):
+    code = "invalid_type_override"
+    status_code = 422
+
+
+class UnknownColumnError(IngestError):
+    code = "unknown_column"
+    status_code = 422
+
+
+def _canonical_type_overrides(
+    raw: dict[str, str] | None,
+) -> dict[str, str] | None:
+    if not raw:
+        return None
+    overrides: dict[str, str] = {}
+    for raw_column, raw_type in raw.items():
+        column = str(raw_column)
+        type_name = str(raw_type).strip().lower()
+        canonical = TYPE_OVERRIDE_ALIASES.get(type_name)
+        if canonical is None:
+            supported = ", ".join(sorted({"int", "float", "string", "bool", "date", "datetime"}))
+            raise InvalidTypeOverrideError(
+                f"unsupported type override for column {column!r}: {raw_type!r}",
+                hint=f"supported types: {supported}",
+            )
+        overrides[column] = canonical
+    return overrides
+
+
+def _null_values(missing_values: list[str] | None) -> list[str]:
+    values = list(NULL_VALUES)
+    for marker in missing_values or []:
+        if marker not in values:
+            values.append(marker)
+    return values
+
+
+def _polars_type_overrides(
+    type_overrides: dict[str, str] | None,
+) -> dict[str, Any]:
+    """Read override columns as strings, then cast with warnings in one place."""
+    return {column: pl.String for column in (type_overrides or {})}
+
+
+def apply_type_overrides(
+    frame: pl.DataFrame,
+    type_overrides: dict[str, str] | None,
+) -> tuple[pl.DataFrame, list[dict[str, Any]]]:
+    """Cast override columns, turning invalid values into null with a warning."""
+    issues: list[dict[str, Any]] = []
+    for column, type_name in (type_overrides or {}).items():
+        if column not in frame.columns:
+            continue
+        original = frame.get_column(column)
+        source = original.cast(pl.String, strict=False)
+        result: pl.Expr | pl.Series
+        if type_name == "string":
+            result = source
+        elif type_name == "bool":
+            lowered = source.str.strip_chars().str.to_lowercase()
+            result = (
+                pl.when(lowered.is_in(["true", "1", "yes"]))
+                .then(True)
+                .when(lowered.is_in(["false", "0", "no"]))
+                .then(False)
+                .otherwise(None)
+            )
+        elif type_name == "int":
+            result = source.cast(pl.Int64, strict=False)
+        elif type_name == "float":
+            result = source.cast(pl.Float64, strict=False)
+        elif type_name == "date":
+            result = source.str.to_date(strict=False)
+        elif type_name == "datetime":
+            result = source.str.to_datetime(strict=False)
+        else:
+            continue
+        result_series = (
+            frame.select(result.alias(column)).to_series()
+            if isinstance(result, pl.Expr)
+            else result
+        )
+        before = int(original.is_not_null().sum())
+        after = int(result_series.is_not_null().sum())
+        if after < before:
+            issues.append(
+                {
+                    "code": "invalid_type_override_value",
+                    "severity": "warning",
+                    "column": column,
+                    "message": (
+                        f"{before - after} value(s) in {column!r} could not be "
+                        f"converted to {type_name} and were set to null"
+                    ),
+                }
+            )
+        frame = frame.with_columns(result_series)
+    return frame, issues
+
+
+def _expected_columns(text: str, delimiter: str, has_header: bool) -> list[str] | None:
+    sample = "\n".join(line for line in text.splitlines()[:1] if line.strip())
+    if not sample:
+        return None
+    try:
+        first = next(csv.reader(io.StringIO(sample), delimiter=delimiter), [])
+    except csv.Error:
+        return None
+    if not first:
+        return None
+    if has_header:
+        return first
+    return [f"column_{index + 1}" for index in range(len(first))]
+
+
+def _validate_override_columns(
+    columns: list[str] | None, type_overrides: dict[str, str] | None
+) -> None:
+    if not type_overrides or columns is None:
+        return
+    unknown = sorted(set(type_overrides) - set(columns))
+    if unknown:
+        names = ", ".join(unknown)
+        raise UnknownColumnError(
+            f"type override references unknown column(s): {names}",
+            hint="use column names from the inspected header",
+        )
+
+
 @dataclass(slots=True)
 class ImportOptions:
     """User overrides and sampling controls for one import."""
@@ -91,6 +242,8 @@ class ImportOptions:
     raw_offset: int = 0
     sample_rows: int = MAX_SAMPLE_ROWS
     preview_rows: int = 20
+    missing_values: list[str] | None = None
+    type_overrides: dict[str, str] | None = None
 
     def normalized(self, *, default_sample_rows: int) -> ImportOptions:
         sample_rows = min(max(self.sample_rows, 1), default_sample_rows)
@@ -98,6 +251,15 @@ class ImportOptions:
         delimiter = self.delimiter
         if delimiter is not None and len(delimiter) != 1:
             raise InvalidSourceError("delimiter must be a single character")
+        missing_values: list[str] | None = None
+        if self.missing_values:
+            missing_values = []
+            for marker in self.missing_values:
+                text = str(marker)
+                if text not in missing_values:
+                    missing_values.append(text)
+            missing_values = missing_values or None
+        type_overrides = _canonical_type_overrides(self.type_overrides)
         return ImportOptions(
             encoding=self.encoding,
             delimiter=delimiter,
@@ -110,6 +272,8 @@ class ImportOptions:
             raw_offset=max(self.raw_offset, 0),
             sample_rows=sample_rows,
             preview_rows=preview_rows,
+            missing_values=missing_values,
+            type_overrides=type_overrides,
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -125,6 +289,8 @@ class ImportOptions:
             "raw_offset": self.raw_offset,
             "sample_rows": self.sample_rows,
             "preview_rows": self.preview_rows,
+            "missing_values": self.missing_values,
+            "type_overrides": self.type_overrides,
         }
 
 
@@ -273,10 +439,10 @@ def unique_headers(raw: list[str], width: int) -> list[str]:
     return headers
 
 
-def coerce_value(value: str) -> Any:
+def coerce_value(value: str, missing_values: list[str] | None = None) -> Any:
     """Convert a CSV string to a conservative Python scalar."""
     stripped = value.strip()
-    if stripped in NULL_VALUES:
+    if stripped in _null_values(missing_values):
         return None
     if NUMERIC_INT.fullmatch(stripped):
         digits = stripped.lstrip("+-")
@@ -303,12 +469,50 @@ def coerce_value(value: str) -> Any:
     return stripped
 
 
+def _cast_override(value: Any, type_name: str | None) -> Any:
+    if value is None or type_name is None:
+        return value
+    try:
+        if type_name == "int":
+            return int(value)
+        if type_name == "float":
+            return float(value)
+        if type_name == "string":
+            return str(value)
+        if type_name == "bool":
+            if isinstance(value, str):
+                lowered = value.strip().lower()
+                if lowered in {"true", "1", "yes"}:
+                    return True
+                if lowered in {"false", "0", "no"}:
+                    return False
+                return value
+            return bool(value)
+        if type_name == "date":
+            if isinstance(value, datetime):
+                return value.date()
+            if isinstance(value, date):
+                return value
+            return date.fromisoformat(str(value)[:10])
+        if type_name == "datetime":
+            if isinstance(value, datetime):
+                return value
+            if isinstance(value, date):
+                return datetime.combine(value, time())
+            return datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return value
+    return value
+
+
 def read_csv_fallback(
     path: Path,
     encoding: str,
     delimiter: str,
     has_header: bool,
     sample_rows: int,
+    missing_values: list[str] | None = None,
+    type_overrides: dict[str, str] | None = None,
 ) -> tuple[pl.DataFrame, int, bool, bool]:
     """Read a CSV sample with the stdlib for non-UTF-8 encodings."""
     try:
@@ -337,12 +541,17 @@ def read_csv_fallback(
         [len(header_raw)] + [len(row) for row in data_rows] + [0],
     )
     headers = unique_headers(header_raw, width)
+    _validate_override_columns(headers, type_overrides)
     records: list[dict[str, Any]] = []
     for row in data_rows[:sample_rows]:
         padded = list(row) + [""] * (width - len(row))
-        records.append(
-            {header: coerce_value(padded[index]) for index, header in enumerate(headers)}
-        )
+        record: dict[str, Any] = {}
+        for index, header in enumerate(headers):
+            raw = padded[index]
+            coerced = coerce_value(raw, missing_values)
+            override = (type_overrides or {}).get(header)
+            record[header] = raw if coerced is not None and override else coerced
+        records.append(record)
     if not records:
         frame = pl.DataFrame({header: [] for header in headers})
     else:
@@ -362,16 +571,21 @@ def _polars_csv_options(
     delimiter: str,
     has_header: bool,
     sample_rows: int,
+    missing_values: list[str] | None = None,
+    schema_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    options: dict[str, Any] = {
         "separator": delimiter,
         "has_header": has_header,
         "encoding": "utf8",
         "infer_schema_length": sample_rows,
         "try_parse_dates": True,
-        "null_values": NULL_VALUES,
+        "null_values": _null_values(missing_values),
         "truncate_ragged_lines": True,
     }
+    if schema_overrides:
+        options["schema_overrides"] = schema_overrides
+    return options
 
 
 def read_csv_polars(
@@ -379,13 +593,30 @@ def read_csv_polars(
     delimiter: str,
     has_header: bool,
     sample_rows: int,
+    *,
+    text: str | None = None,
+    missing_values: list[str] | None = None,
+    type_overrides: dict[str, str] | None = None,
 ) -> tuple[pl.DataFrame, int, bool, bool]:
     """Read a UTF-8 CSV sample and estimate or count rows."""
-    options = _polars_csv_options(delimiter, has_header, sample_rows)
+    if text is not None:
+        _validate_override_columns(
+            _expected_columns(text, delimiter, has_header),
+            type_overrides,
+        )
+    schema_overrides = _polars_type_overrides(type_overrides)
+    options = _polars_csv_options(
+        delimiter,
+        has_header,
+        sample_rows,
+        missing_values,
+        schema_overrides,
+    )
     try:
         frame = pl.read_csv(path, n_rows=sample_rows, **options)
     except Exception as exc:
         raise CorruptFileError(f"cannot parse CSV: {exc}") from exc
+    _validate_override_columns(frame.columns, type_overrides)
 
     size = path.stat().st_size
     if size <= EXACT_ROW_COUNT_LIMIT:
@@ -484,12 +715,26 @@ def inspect_file(
             has_bom = probe.read(3) == codecs.BOM_UTF8
         if encoding.lower() in {"utf-8", "ascii"} and not has_bom:
             frame, row_count, sampled, estimated = read_csv_polars(
-                path, delimiter, has_header, effective.sample_rows
+                path,
+                delimiter,
+                has_header,
+                effective.sample_rows,
+                text=text,
+                missing_values=effective.missing_values,
+                type_overrides=effective.type_overrides,
             )
         else:
             frame, row_count, sampled, estimated = read_csv_fallback(
-                path, encoding, delimiter, has_header, effective.sample_rows
+                path,
+                encoding,
+                delimiter,
+                has_header,
+                effective.sample_rows,
+                effective.missing_values,
+                effective.type_overrides,
             )
+        frame, override_issues = apply_type_overrides(frame, effective.type_overrides)
+        issues.extend(override_issues)
         if encoding.lower() not in {"utf-8", "utf-8-sig", "ascii"}:
             issues.append(
                 {
@@ -648,6 +893,8 @@ def read_preview(
         sheet=options.get("sheet"),
         sample_rows=max(offset + limit, 1),
         preview_rows=limit,
+        missing_values=options.get("missing_values"),
+        type_overrides=options.get("type_overrides"),
     ).normalized(default_sample_rows=max(offset + limit, 1))
     path, file_format, _size, _mtime = resolve_source(path_value, max_file_bytes)
     if file_format in {"csv", "tsv"}:
@@ -655,8 +902,14 @@ def read_preview(
         delimiter = effective.delimiter or ("," if file_format == "csv" else "\t")
         has_header = effective.has_header if effective.has_header is not None else True
         if encoding.lower() in {"utf-8", "ascii"}:
-            options_polars = _polars_csv_options(delimiter, has_header, offset + limit)
+            options_polars = _polars_csv_options(
+                delimiter,
+                has_header,
+                offset + limit,
+                effective.missing_values,
+            )
             overrides = _schema_overrides(schema)
+            overrides.update(_polars_type_overrides(effective.type_overrides))
             if overrides:
                 options_polars["schema_overrides"] = overrides
             if has_header:
@@ -667,6 +920,8 @@ def read_preview(
                 frame = pl.read_csv(path, n_rows=limit, **options_polars)
             except Exception as exc:
                 raise CorruptFileError(f"cannot parse CSV preview: {exc}") from exc
+            _validate_override_columns(frame.columns, effective.type_overrides)
+            frame, _ = apply_type_overrides(frame, effective.type_overrides)
             return frame_to_rows(frame)
         headers: list[str] = []
         try:
@@ -686,13 +941,23 @@ def read_preview(
             raise InvalidSourceError(f"unknown encoding: {encoding}") from exc
         if not has_header:
             headers = unique_headers([], max((len(row) for row in raw), default=0))
+        _validate_override_columns(headers, effective.type_overrides)
         records = []
         for row in raw:
             padded = list(row) + [""] * (len(headers) - len(row))
-            records.append(
-                {header: coerce_value(padded[index]) for index, header in enumerate(headers)}
-            )
-        return frame_to_rows(pl.DataFrame(records) if records else pl.DataFrame())
+            record: dict[str, Any] = {}
+            for index, header in enumerate(headers):
+                raw_value = padded[index]
+                coerced = coerce_value(raw_value, effective.missing_values)
+                record[header] = (
+                    raw_value
+                    if coerced is not None and (effective.type_overrides or {}).get(header)
+                    else coerced
+                )
+            records.append(record)
+        frame = pl.DataFrame(records, strict=False) if records else pl.DataFrame()
+        frame, _ = apply_type_overrides(frame, effective.type_overrides)
+        return frame_to_rows(frame)
 
     if file_format == "jsonl":
         return frame_to_rows(pl.scan_ndjson(path).slice(offset, limit).collect())

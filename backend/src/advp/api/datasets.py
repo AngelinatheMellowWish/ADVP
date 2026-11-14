@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import math
 from typing import Any, NoReturn
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from advp import analysis as analysis_service
@@ -20,6 +22,7 @@ from advp.api.schemas import (
     DatasetChartCandidatesRequest,
     DatasetDetail,
     PreviewResponse,
+    ProfileOverridesRequest,
     RelocateRequest,
 )
 from advp.charts import builder as builder_service
@@ -32,7 +35,8 @@ from advp.charts.selector import (
     select_table_candidates,
     to_response,
 )
-from advp.ingest.files import IngestError
+from advp.config import get_settings
+from advp.ingest.files import IngestError, read_preview
 from advp.llm import providers as provider_service
 from advp.models import Dataset
 from advp.services import projects as project_service
@@ -98,11 +102,91 @@ def get_preview(
         _raise_ingest(exc)
 
 
+@router.get("/{dataset_id}/export/sample")
+def export_sample_csv(
+    dataset_id: str,
+    session: DbSession,
+    rows: int = Query(default=1000, ge=1),
+    full: bool = Query(default=False),
+) -> Response:
+    dataset = _dataset_or_404(session, dataset_id)
+    settings = get_settings()
+    requested = dataset.row_count if full else min(rows, dataset.row_count or rows)
+    limit = max(1, min(requested, 1_000_000))
+    try:
+        records = read_preview(
+            dataset.source_path,
+            dataset.options or {},
+            limit=limit,
+            offset=0,
+            max_file_bytes=settings.max_file_bytes,
+            schema=dataset.schema_json,
+            max_limit=limit,
+        )
+    except IngestError as exc:
+        _raise_ingest(exc)
+    columns = [
+        str(column["name"])
+        for column in dataset.schema_json.get("columns", [])
+        if isinstance(column, dict) and column.get("name")
+    ]
+    sensitive = {
+        str(column["name"])
+        for column in dataset.profile_json.get("columns", [])
+        if isinstance(column, dict) and column.get("sensitive") and column.get("name")
+    }
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(columns)
+    for record in records:
+        writer.writerow(
+            ["***" if column in sensitive else record.get(column, "") for column in columns]
+        )
+    writer.writerow([f"# Sensitive columns are masked; export limited to {limit} rows."])
+    safe_name = (
+        "".join(char if char.isalnum() or char in "._-" else "-" for char in dataset.name)
+        or "sample"
+    )
+    return Response(
+        content=buffer.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}-sample.csv"'},
+    )
+
+
 @router.post("/{dataset_id}/reprofile", response_model=DatasetDetail)
 def reprofile_dataset(dataset_id: str, session: DbSession) -> dict[str, object]:
     dataset = _dataset_or_404(session, dataset_id)
     try:
         dataset = project_service.reprofile_dataset(session, dataset)
+    except IngestError as exc:
+        _raise_ingest(exc)
+    return project_service.dataset_detail(dataset)
+
+
+@router.post("/{dataset_id}/profile-overrides", response_model=DatasetDetail)
+def update_profile_overrides(
+    dataset_id: str,
+    payload: ProfileOverridesRequest,
+    session: DbSession,
+) -> dict[str, object]:
+    dataset = _dataset_or_404(session, dataset_id)
+    if dataset.kind != "table":
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "unsupported_kind",
+                "message": f"dataset kind {dataset.kind!r} has no profile overrides",
+                "hint": "profile overrides are only available for tabular datasets",
+            },
+        )
+    try:
+        dataset = project_service.update_profile_overrides(
+            session,
+            dataset,
+            sensitive_columns=payload.sensitive_columns,
+            type_overrides=payload.type_overrides,
+        )
     except IngestError as exc:
         _raise_ingest(exc)
     return project_service.dataset_detail(dataset)

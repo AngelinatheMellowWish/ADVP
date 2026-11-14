@@ -60,6 +60,27 @@ def init_db() -> None:
                 connection.execute(
                     text("ALTER TABLE providers ADD COLUMN sample_rows INTEGER NOT NULL DEFAULT 3")
                 )
+        if "max_concurrency" not in columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE providers "
+                        "ADD COLUMN max_concurrency INTEGER NOT NULL DEFAULT 2"
+                    )
+                )
+        if "concurrency_wait_seconds" not in columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE providers "
+                        "ADD COLUMN concurrency_wait_seconds INTEGER NOT NULL DEFAULT 30"
+                    )
+                )
+        if "task_budget" not in columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text("ALTER TABLE providers ADD COLUMN task_budget FLOAT NOT NULL DEFAULT 2.0")
+                )
     if "llm_usage" in tables:
         columns = {column["name"] for column in inspector.get_columns("llm_usage")}
         if "project_id" not in columns:

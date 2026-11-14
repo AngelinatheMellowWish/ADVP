@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { errorMessage } from '../api/projects'
 import {
@@ -16,16 +16,19 @@ export function RenderPanel({
   mode,
   isovalue,
   animation,
+  animationToken = 0,
 }: {
   sceneId: string
   mode?: string
   isovalue?: number
   animation?: Record<string, unknown>
+  animationToken?: number
 }) {
   const [probe, setProbe] = useState<RendererProbe | null>(null)
   const [job, setJob] = useState<RenderJob | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const lastAnimation = useRef(0)
 
   useEffect(() => {
     let cancelled = false
@@ -51,7 +54,7 @@ export function RenderPanel({
     return () => window.clearInterval(timer)
   }, [job])
 
-  async function start() {
+  const start = useCallback(async () => {
     setBusy(true)
     setError(null)
     try {
@@ -69,7 +72,13 @@ export function RenderPanel({
     } finally {
       setBusy(false)
     }
-  }
+  }, [sceneId, mode, isovalue, animation])
+
+  useEffect(() => {
+    if (!animationToken || animationToken === lastAnimation.current) return
+    lastAnimation.current = animationToken
+    void start()
+  }, [animationToken, start])
 
   async function cancel() {
     if (!job) return

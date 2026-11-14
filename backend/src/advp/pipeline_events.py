@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from advp.logging_config import redact
 from advp.models import PipelineEvent
 
 
@@ -55,5 +56,18 @@ def event_dict(row: PipelineEvent) -> dict[str, Any]:
         "seq": row.seq,
         "type": row.type,
         "payload": row.payload_json,
+        "created_at": row.created_at,
+    }
+
+
+def log_event_dict(row: PipelineEvent) -> dict[str, Any]:
+    """Serialize one event for the log panel with secrets and paths redacted."""
+    payload = redact(row.payload_json)
+    return {
+        "id": row.id,
+        "run_id": row.run_id,
+        "seq": row.seq,
+        "type": row.type,
+        "payload": payload,
         "created_at": row.created_at,
     }

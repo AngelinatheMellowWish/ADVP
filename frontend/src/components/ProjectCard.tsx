@@ -183,19 +183,32 @@ export function ProjectCard({ project, onChanged }: ProjectCardProps) {
             role="group"
             aria-label={t('home.project.actionsLabel', { name: project.name })}
           >
-            <button className="btn" type="button" onClick={openProject} disabled={busy}>
+            <button
+              className="btn"
+              type="button"
+              data-action="open"
+              onClick={openProject}
+              disabled={busy}
+            >
               {t('home.project.open')}
             </button>
             <button
               className="btn"
               type="button"
+              data-action="rename"
               onClick={startRename}
               disabled={busy}
               aria-label={`${t('home.project.rename')}: ${project.name}`}
             >
               {t('home.project.rename')}
             </button>
-            <button className="btn" type="button" onClick={toggleArchive} disabled={busy}>
+            <button
+              className="btn"
+              type="button"
+              data-action="archive"
+              onClick={toggleArchive}
+              disabled={busy}
+            >
               {project.archived
                 ? t('home.project.unarchive')
                 : t('home.project.archive')}
@@ -203,6 +216,7 @@ export function ProjectCard({ project, onChanged }: ProjectCardProps) {
             <button
               className="btn project-card-danger"
               type="button"
+              data-action="delete"
               onClick={removeProject}
               disabled={busy}
             >
@@ -211,6 +225,7 @@ export function ProjectCard({ project, onChanged }: ProjectCardProps) {
             <button
               className="btn"
               type="button"
+              data-action="reveal"
               onClick={revealFolder}
               disabled={busy || project.dataset_count === 0}
               aria-describedby={

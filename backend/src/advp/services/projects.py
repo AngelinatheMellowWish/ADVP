@@ -15,7 +15,7 @@ import polars as pl
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from advp import __version__
+from advp import __version__, audit
 from advp.config import get_settings
 from advp.ingest.documents import (
     extract_document_tables,
@@ -26,7 +26,9 @@ from advp.ingest.files import (
     ImportOptions,
     InvalidSourceError,
     SourceChangedError,
+    UnknownColumnError,
     UnsupportedFormatError,
+    _canonical_type_overrides,
     frame_to_rows,
     inspect_file,
     read_preview,
@@ -48,7 +50,7 @@ from advp.ingest.textstats import (
     extract_facts,
 )
 from advp.ingest.web import (
-    fetch_web_tables,
+    extract_tables,
     materialize_web_table,
 )
 from advp.ingest.web import (
@@ -86,7 +88,57 @@ class LoadedDataset:
     variables: list[dict[str, Any]] = field(default_factory=list)
 
 
-def _load_dataset(path: str, options: ImportOptions | None) -> LoadedDataset:
+IMPORT_OPTION_KEYS = frozenset(
+    {
+        "encoding",
+        "delimiter",
+        "has_header",
+        "sheet",
+        "variable",
+        "shape",
+        "dtype",
+        "byte_order",
+        "raw_offset",
+        "sample_rows",
+        "preview_rows",
+        "missing_values",
+        "type_overrides",
+    }
+)
+
+
+def profile_overrides_for(dataset: Dataset) -> dict[str, Any] | None:
+    """Return persisted profile overrides, or None when none were configured."""
+    raw = (dataset.options or {}).get("profile_overrides")
+    if not isinstance(raw, dict):
+        return None
+    sensitive = raw.get("sensitive_columns")
+    types = raw.get("type_overrides")
+    return {
+        "sensitive_columns": [str(item) for item in sensitive]
+        if isinstance(sensitive, list)
+        else [],
+        "type_overrides": {str(key): str(value) for key, value in types.items()}
+        if isinstance(types, dict)
+        else {},
+    }
+
+
+def _import_options_from_dataset(dataset: Dataset) -> ImportOptions:
+    options = dataset.options or {}
+    values = {key: value for key, value in options.items() if key in IMPORT_OPTION_KEYS}
+    overrides = profile_overrides_for(dataset)
+    if overrides and overrides["type_overrides"] and not values.get("type_overrides"):
+        values["type_overrides"] = overrides["type_overrides"]
+    return ImportOptions(**values)
+
+
+def _load_dataset(
+    path: str,
+    options: ImportOptions | None,
+    *,
+    sensitive_columns: set[str] | None = None,
+) -> LoadedDataset:
     settings = get_settings()
     if is_scientific_source(path):
         inspection = inspect_scientific(
@@ -125,6 +177,7 @@ def _load_dataset(path: str, options: ImportOptions | None) -> LoadedDataset:
         sample_rows=loaded.frame.height,
         row_count=loaded.row_count,
         row_count_estimated=loaded.row_count_estimated,
+        sensitive_columns=sensitive_columns,
     )
     schema = schema_from_profile(profile)
     preview = frame_to_rows(
@@ -489,6 +542,7 @@ def import_remote_dataset(
     headers: dict[str, str] | None,
     auth: dict[str, Any] | None,
     options: ImportOptions | None,
+    timeout: float = 30.0,
 ) -> Dataset:
     settings = get_settings()
     output_dir = settings.workspace_dir / "derived" / project.id
@@ -499,6 +553,7 @@ def import_remote_dataset(
         auth=auth,
         filename=filename,
         max_bytes=settings.max_file_bytes,
+        timeout=timeout,
     )
     default_name = Path(remote.label).name or "Remote dataset"
     try:
@@ -865,10 +920,20 @@ def inspect_web(
     headers: dict[str, str] | None,
     auth: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    tables = fetch_web_tables(url, headers=headers, auth=auth)
+    result = extract_tables(url, headers=headers, auth=auth)
+    tables = result["tables"]
+    if not tables:
+        raise InvalidSourceError(
+            "no usable HTML tables were found on the page",
+            hint=result["warning"]
+            or "the page may need JavaScript; dynamic rendering found no tables",
+        )
     return {
         "url": redact_label(url),
         "format": "html",
+        "source": result["source"],
+        "elapsed_ms": result["elapsed_ms"],
+        "warning": result["warning"],
         "tables": [web_table_summary(table) for table in tables],
     }
 
@@ -1121,8 +1186,62 @@ def get_dataset(session: Session, dataset_id: str) -> Dataset | None:
     return session.get(Dataset, dataset_id)
 
 
+def update_profile_overrides(
+    session: Session,
+    dataset: Dataset,
+    *,
+    sensitive_columns: list[str],
+    type_overrides: dict[str, str],
+) -> Dataset:
+    """Persist profile overrides, then recompute schema, profile, and quality."""
+    known_columns = {
+        str(column.get("name"))
+        for column in (dataset.schema_json or {}).get("columns", [])
+        if isinstance(column, dict)
+    }
+    requested = set(sensitive_columns) | set(type_overrides)
+    unknown = sorted(requested - known_columns)
+    if unknown:
+        raise UnknownColumnError(
+            f"profile override references unknown column(s): {', '.join(unknown)}",
+            hint="use column names from the dataset schema",
+        )
+    canonical_types = _canonical_type_overrides(type_overrides) or {}
+    unique_sensitive: list[str] = []
+    for column in sensitive_columns:
+        name = str(column)
+        if name not in unique_sensitive:
+            unique_sensitive.append(name)
+    overrides = {
+        "sensitive_columns": unique_sensitive,
+        "type_overrides": canonical_types,
+    }
+    options = dict(dataset.options or {})
+    options["profile_overrides"] = overrides
+    options["type_overrides"] = canonical_types or None
+    dataset.options = options
+    session.commit()
+    dataset = reprofile_dataset(session, dataset)
+    audit.record_event(
+        session,
+        "dataset_profile_overrides_updated",
+        project_id=dataset.project_id,
+        target_type="dataset",
+        target_id=dataset.id,
+        detail=overrides,
+    )
+    return dataset
+
+
 def reprofile_dataset(session: Session, dataset: Dataset) -> Dataset:
-    loaded = _load_dataset(dataset.source_path, ImportOptions(**dataset.options))
+    options = dict(dataset.options or {})
+    overrides = profile_overrides_for(dataset)
+    sensitive_columns = set(overrides["sensitive_columns"]) if overrides is not None else None
+    loaded = _load_dataset(
+        dataset.source_path,
+        _import_options_from_dataset(dataset),
+        sensitive_columns=sensitive_columns,
+    )
     dataset.kind = loaded.kind
     dataset.format = loaded.format
     dataset.source_sha256 = sha256_source(loaded.path)
@@ -1132,7 +1251,7 @@ def reprofile_dataset(session: Session, dataset: Dataset) -> Dataset:
     dataset.row_count_estimated = loaded.row_count_estimated
     dataset.column_count = loaded.column_count
     dataset.sampled = loaded.sampled
-    dataset.options = loaded.options
+    dataset.options = {**options, **loaded.options}
     dataset.schema_json = loaded.schema
     dataset.profile_json = {**loaded.profile, "import_issues": loaded.issues}
     dataset.preview_json = loaded.preview
@@ -1149,7 +1268,14 @@ def relocate_dataset(
     path: str,
     force: bool,
 ) -> Dataset:
-    loaded = _load_dataset(path, ImportOptions(**dataset.options))
+    options = dict(dataset.options or {})
+    overrides = profile_overrides_for(dataset)
+    sensitive_columns = set(overrides["sensitive_columns"]) if overrides is not None else None
+    loaded = _load_dataset(
+        path,
+        _import_options_from_dataset(dataset),
+        sensitive_columns=sensitive_columns,
+    )
     digest = sha256_source(loaded.path)
     changed = digest != dataset.source_sha256
     if changed and not force:
@@ -1168,7 +1294,7 @@ def relocate_dataset(
         dataset.row_count_estimated = loaded.row_count_estimated
         dataset.column_count = loaded.column_count
         dataset.sampled = loaded.sampled
-        dataset.options = loaded.options
+        dataset.options = {**options, **loaded.options}
         dataset.schema_json = loaded.schema
         dataset.profile_json = {**loaded.profile, "import_issues": loaded.issues}
         dataset.preview_json = loaded.preview

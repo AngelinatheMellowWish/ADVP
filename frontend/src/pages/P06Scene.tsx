@@ -93,6 +93,9 @@ export function P06Scene() {
   const [fps, setFps] = useState(30)
   const [startFrame, setStartFrame] = useState(0)
   const [screenshot, setScreenshot] = useState<string | null>(null)
+  const [screenshotToken, setScreenshotToken] = useState(0)
+  const [resetToken, setResetToken] = useState(0)
+  const [animationToken, setAnimationToken] = useState(0)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -320,6 +323,68 @@ export function P06Scene() {
       {loading ? <p className="muted">{t('scenePage.loading')}</p> : null}
       {serverDisabled ? <p className="notice">{t('scenePage.probeUnavailable')}</p> : null}
 
+      <section
+        className="card scene-toolbar"
+        data-testid="scene-toolbar"
+        aria-label={t('scenePage.toolbar')}
+      >
+        <div className="inline-form">
+          <label>
+            {t('scenePage.backend')}
+            <select
+              className="input"
+              aria-label={t('scenePage.switchBackend')}
+              value={backend}
+              onChange={(event) => setBackend(event.target.value as Backend)}
+            >
+              {BACKENDS.map((item) => (
+                <option
+                  key={item}
+                  value={item}
+                  disabled={serverDisabled && (item === 'mayavi' || item === 'trame')}
+                >
+                  {t(`scenePage.backends.${item}`)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            className="btn"
+            type="button"
+            onClick={() => setResetToken((value) => value + 1)}
+            disabled={!geometry}
+          >
+            {t('scenePage.resetView')}
+          </button>
+          <button
+            className="btn"
+            type="button"
+            onClick={() => setScreenshotToken((value) => value + 1)}
+            disabled={!geometry}
+          >
+            {t('scenePage.screenshot')}
+          </button>
+          <button
+            className="btn"
+            type="button"
+            onClick={() => setAnimationToken((value) => value + 1)}
+            disabled={!scene}
+          >
+            {t('scenePage.exportAnimation')}
+          </button>
+          <button
+            className="btn home-primary"
+            type="button"
+            onClick={() => void saveScene()}
+            disabled={busy || !dataset}
+          >
+            {busy ? t('scenePage.saving') : t('scenePage.saveSceneJson')}
+          </button>
+        </div>
+        <p className="muted">{t('scenePage.backendRetained')}</p>
+        {serverDisabled ? <p className="muted">{t('scenePage.serverDisabled')}</p> : null}
+      </section>
+
       <div className="scene-layout">
         <div className="scene-main">
           <section className="card">
@@ -328,18 +393,6 @@ export function P06Scene() {
                 <h2>{t('scenePage.geometry')}</h2>
                 <p className="muted">{t('scenePage.geometryHint')}</p>
               </div>
-              <button
-                className="btn home-primary"
-                type="button"
-                onClick={() => void saveScene()}
-                disabled={busy || !dataset}
-              >
-                {busy
-                  ? t('scenePage.saving')
-                  : scene
-                    ? t('scenePage.updateScene')
-                    : t('scenePage.createScene')}
-              </button>
             </div>
             <div className="scene-controls">
               <label>
@@ -409,27 +462,6 @@ export function P06Scene() {
                   <span className="muted">{isovalue.toFixed(2)}</span>
                 </label>
               ) : null}
-              <label>
-                {t('scenePage.backend')}
-                <select
-                  className="input"
-                  value={backend}
-                  onChange={(event) => setBackend(event.target.value as Backend)}
-                >
-                  {BACKENDS.map((item) => (
-                    <option
-                      key={item}
-                      value={item}
-                      disabled={serverDisabled && (item === 'mayavi' || item === 'trame')}
-                    >
-                      {t(`scenePage.backends.${item}`)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {serverDisabled ? (
-                <p className="muted scene-probe-hint">{t('scenePage.serverDisabled')}</p>
-              ) : null}
             </div>
           </section>
 
@@ -462,6 +494,8 @@ export function P06Scene() {
                 clipping={clippingEnabled}
                 transferFunction={transfer}
                 onScreenshot={setScreenshot}
+                screenshotToken={screenshotToken}
+                resetToken={resetToken}
               />
             ) : (
               <p className="muted">{t('scenePage.canvasEmpty')}</p>
@@ -483,6 +517,7 @@ export function P06Scene() {
                 mode={mode}
                 isovalue={isovalue}
                 animation={{ frames, fps, startFrame }}
+                animationToken={animationToken}
               />
             ) : null}
             {scene ? <SciViewPanel sceneId={scene.id} /> : null}

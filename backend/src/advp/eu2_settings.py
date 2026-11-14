@@ -12,7 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from advp.config import Settings
 
@@ -27,9 +27,15 @@ class Eu2Settings(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     language: Literal["zh", "en"] = "zh"
+    startup_behavior: Literal["home", "last_project"] = "last_project"
     workspace: str | None = None
     analysis_sample_rows: int = Field(default=10_000, ge=1, le=100_000)
     render_sample_rows: int = Field(default=20_000, ge=1, le=100_000)
+    max_reselects: int = Field(default=2, ge=0, le=2)
+    analysis_concurrency: int = Field(default=2, ge=1, le=8)
+    default_pipeline_options: dict[str, bool] = Field(
+        default_factory=lambda: {"clean": True, "analyze": True, "report": True}
+    )
     default_provider_id: str | None = None
     global_budget: float | None = Field(default=None, ge=0)
     monthly_budget: float | None = Field(default=None, ge=0)
@@ -37,8 +43,24 @@ class Eu2Settings(BaseModel):
     search_sensitive: bool = False
     search_excluded_projects: list[str] = Field(default_factory=list)
     sandbox_timeout_seconds: int = Field(default=30, ge=1, le=600)
+    sandbox_max_memory_mb: int = Field(default=8192, ge=256, le=65_536)
+    sandbox_max_cpu_seconds: int = Field(default=300, ge=1, le=3_600)
+    log_retention_days: Literal[7, 14, 30] = 14
+    log_level: Literal["INFO", "DEBUG", "WARN"] = "INFO"
     log_redaction: bool = True
     update_channel: Literal["stable", "beta"] = "stable"
+
+    @field_validator("default_pipeline_options")
+    @classmethod
+    def _validate_pipeline_options(cls, value: dict[str, bool]) -> dict[str, bool]:
+        merged = {"clean": True, "analyze": True, "report": True}
+        for key, item in value.items():
+            if key not in merged:
+                raise ValueError(f"unknown pipeline option: {key}")
+            if not isinstance(item, bool):
+                raise ValueError(f"pipeline option {key} must be a boolean")
+            merged[key] = item
+        return merged
 
 
 EDITABLE_FIELDS: tuple[str, ...] = tuple(Eu2Settings.model_fields)
@@ -51,9 +73,13 @@ NON_NULLABLE_FIELDS: frozenset[str] = frozenset(EDITABLE_FIELDS) - NULLABLE_FIEL
 
 ENV_OVERRIDES: dict[str, str] = {
     "language": "ADVP_LANGUAGE",
+    "startup_behavior": "ADVP_STARTUP_BEHAVIOR",
     "workspace": "ADVP_WORKSPACE_DIR",
     "analysis_sample_rows": "ADVP_ANALYSIS_SAMPLE_ROWS",
     "render_sample_rows": "ADVP_RENDER_SAMPLE_ROWS",
+    "max_reselects": "ADVP_MAX_RESELECTS",
+    "analysis_concurrency": "ADVP_ANALYSIS_CONCURRENCY",
+    "default_pipeline_options": "ADVP_DEFAULT_PIPELINE_OPTIONS",
     "default_provider_id": "ADVP_DEFAULT_PROVIDER_ID",
     "global_budget": "ADVP_GLOBAL_BUDGET",
     "monthly_budget": "ADVP_MONTHLY_BUDGET",
@@ -61,6 +87,10 @@ ENV_OVERRIDES: dict[str, str] = {
     "search_sensitive": "ADVP_SEARCH_SENSITIVE",
     "search_excluded_projects": "ADVP_SEARCH_EXCLUDED_PROJECTS",
     "sandbox_timeout_seconds": "ADVP_SANDBOX_TIMEOUT_SECONDS",
+    "sandbox_max_memory_mb": "ADVP_SANDBOX_MAX_MEMORY_MB",
+    "sandbox_max_cpu_seconds": "ADVP_SANDBOX_MAX_CPU_SECONDS",
+    "log_retention_days": "ADVP_LOG_RETENTION_DAYS",
+    "log_level": "ADVP_LOG_LEVEL",
     "log_redaction": "ADVP_LOG_REDACTION",
     "update_channel": "ADVP_UPDATE_CHANNEL",
 }
@@ -212,6 +242,23 @@ class SettingsStore:
         The settings file and the audit database cannot share one transaction, so
         a failed commit rolls the file back to keep the two stores consistent.
         """
+        return self._save_with_commit(values, commit, merge=True)
+
+    def replace_with_commit(
+        self,
+        values: dict[str, Any],
+        commit: Callable[[dict[str, Any]], None],
+    ) -> dict[str, Any]:
+        """Atomically replace all stored settings, keeping only ``values``."""
+        return self._save_with_commit(values, commit, merge=False)
+
+    def _save_with_commit(
+        self,
+        values: dict[str, Any],
+        commit: Callable[[dict[str, Any]], None],
+        *,
+        merge: bool,
+    ) -> dict[str, Any]:
         with _SAVE_LOCK:
             try:
                 previous = self.path.read_bytes()
@@ -219,7 +266,7 @@ class SettingsStore:
                 previous = None
             except OSError as exc:
                 raise SettingsStorageError(str(exc)) from exc
-            ordered = self._save_locked(values)
+            ordered = self._save_locked(values, merge=merge)
             try:
                 commit(ordered)
             except Exception:
@@ -227,11 +274,11 @@ class SettingsStore:
                 raise
             return ordered
 
-    def _save_locked(self, values: dict[str, Any]) -> dict[str, Any]:
+    def _save_locked(self, values: dict[str, Any], *, merge: bool = True) -> dict[str, Any]:
         unknown = sorted(set(values) - set(EDITABLE_FIELDS))
         if unknown:
             raise ValueError(f"unknown settings fields: {', '.join(unknown)}")
-        candidate = {**self.load(), **values}
+        candidate = {**self.load(), **values} if merge else dict(values)
         model = Eu2Settings.model_validate(candidate)
         ordered = {name: getattr(model, name) for name in candidate if name in EDITABLE_FIELDS}
         self.path.parent.mkdir(parents=True, exist_ok=True)

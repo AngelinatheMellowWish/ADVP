@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from advp.config import Settings
+from advp.eu2_settings import runtime_setting
 
 SECRET_KEYS = {
     "api_key",
@@ -138,7 +139,9 @@ def configure_logging(settings: Settings, file_logging: bool = True) -> Path:
     """Install JSONL file and console handlers, or console only in read-only mode."""
     log_dir = settings.log_dir or (settings.workspace_dir / "logs")
     root = logging.getLogger()
-    root.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
+    level_name = str(runtime_setting(settings, "log_level") or settings.log_level)
+    root.setLevel(getattr(logging, level_name.upper(), logging.INFO))
+    retention = int(runtime_setting(settings, "log_retention_days") or 14)
     file_handlers = [handler for handler in root.handlers if getattr(handler, "_advp_file", False)]
     if file_logging:
         log_dir.mkdir(parents=True, exist_ok=True)
@@ -146,7 +149,7 @@ def configure_logging(settings: Settings, file_logging: bool = True) -> Path:
             handler = TimedRotatingFileHandler(
                 log_dir / "advp.jsonl",
                 when="midnight",
-                backupCount=14,
+                backupCount=retention,
                 encoding="utf-8",
                 delay=True,
             )

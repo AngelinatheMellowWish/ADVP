@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import type { TextFact, TextStatsExtraction } from '../api/projects'
 
@@ -11,6 +12,13 @@ type Props = {
   onImport: (shape: Tab, facts: TextFact[]) => void | Promise<void>
   onAIEnhance?: (facts: TextFact[]) => void | Promise<void>
   busy?: boolean
+  facts?: TextFact[]
+  onFactsChange?: (facts: TextFact[]) => void
+  onReset?: () => void
+}
+
+function copyFacts(facts: TextFact[]): TextFact[] {
+  return facts.map((fact) => ({ ...fact }))
 }
 
 function cellText(value: unknown): string {
@@ -23,20 +31,33 @@ function valueOf(fact: TextFact): number | string {
   return fact.value_text ?? ''
 }
 
-function buildWide(facts: TextFact[]): { headers: string[]; rows: Record<string, unknown>[] } {
+function snippetOf(fact: TextFact): string {
+  const snippet = fact.source?.snippet
+  return typeof snippet === 'string' ? snippet : ''
+}
+
+function isNumericAIFact(fact: TextFact): boolean {
+  return fact.include !== false && Boolean(fact.fact_id) && /\d/.test(snippetOf(fact))
+}
+
+function buildWide(
+  facts: TextFact[],
+  metricLabel: string,
+  unitLabel: string,
+): { headers: string[]; rows: Record<string, unknown>[] } {
   const included = facts.filter((fact) => fact.include !== false)
   const subjects: string[] = []
   for (const fact of included) {
     if (!subjects.includes(fact.subject_path)) subjects.push(fact.subject_path)
   }
-  const headers = ['指标', '单位', ...subjects]
+  const headers = [metricLabel, unitLabel, ...subjects]
   const rows: Record<string, unknown>[] = []
   const index = new Map<string, Record<string, unknown>>()
   for (const fact of included) {
     const key = `${fact.metric}\u0000${fact.unit ?? ''}`
     let row = index.get(key)
     if (!row) {
-      row = { 指标: fact.metric, 单位: fact.unit ?? '' }
+      row = { [metricLabel]: fact.metric, [unitLabel]: fact.unit ?? '' }
       for (const subject of subjects) row[subject] = ''
       index.set(key, row)
       rows.push(row)
@@ -46,20 +67,42 @@ function buildWide(facts: TextFact[]): { headers: string[]; rows: Record<string,
   return { headers, rows }
 }
 
-export function TextStatsCandidates({ extraction, onImport, onAIEnhance, busy = false }: Props) {
-  const [facts, setFacts] = useState<TextFact[]>(() =>
-    extraction.long.facts.map((fact) => ({ ...fact })),
+export function TextStatsCandidates({
+  extraction,
+  onImport,
+  onAIEnhance,
+  busy = false,
+  facts: controlledFacts,
+  onFactsChange,
+  onReset,
+}: Props) {
+  const { t } = useTranslation()
+  const [internalFacts, setInternalFacts] = useState<TextFact[]>(() =>
+    copyFacts(extraction.long.facts),
   )
   const [tab, setTab] = useState<Tab>('long')
   const [aiConsent, setAiConsent] = useState(false)
+  const [aiConfirmed, setAiConfirmed] = useState(false)
+  const controlledRef = useRef(controlledFacts !== undefined)
+  controlledRef.current = controlledFacts !== undefined
 
   useEffect(() => {
-    setFacts(extraction.long.facts.map((fact) => ({ ...fact })))
+    if (!controlledRef.current) setInternalFacts(copyFacts(extraction.long.facts))
     setTab('long')
     setAiConsent(false)
+    setAiConfirmed(false)
   }, [extraction])
 
-  const wide = useMemo(() => buildWide(facts), [facts])
+  const facts = controlledFacts ?? internalFacts
+  const wide = useMemo(
+    () =>
+      buildWide(
+        facts,
+        t('importPage.document.textStats.metric'),
+        t('importPage.document.textStats.unit'),
+      ),
+    [facts, t],
+  )
   const warnings = useMemo(() => {
     const seen = new Set<string>()
     const all = [...extraction.long.warnings, ...extraction.wide.warnings]
@@ -71,10 +114,37 @@ export function TextStatsCandidates({ extraction, onImport, onAIEnhance, busy = 
     })
   }, [extraction])
   const included = facts.filter((fact) => fact.include !== false)
+  const aiFacts = useMemo(() => facts.filter(isNumericAIFact), [facts])
+  const aiSignature = useMemo(
+    () =>
+      JSON.stringify(
+        aiFacts.map((fact) => [
+          fact.fact_id,
+          fact.subject_path,
+          fact.metric,
+          fact.value_text,
+          fact.unit,
+          snippetOf(fact),
+        ]),
+      ),
+    [aiFacts],
+  )
+
+  useEffect(() => {
+    setAiConfirmed(false)
+  }, [aiSignature])
+
+  function commitFacts(next: TextFact[]) {
+    if (controlledRef.current && onFactsChange) {
+      onFactsChange(next)
+    } else {
+      setInternalFacts(next)
+    }
+  }
 
   function updateFact(index: number, patch: Partial<TextFact>) {
-    setFacts((current) =>
-      current.map((fact, rowIndex) => (rowIndex === index ? { ...fact, ...patch } : fact)),
+    commitFacts(
+      facts.map((fact, rowIndex) => (rowIndex === index ? { ...fact, ...patch } : fact)),
     )
   }
 
@@ -88,8 +158,8 @@ export function TextStatsCandidates({ extraction, onImport, onAIEnhance, busy = 
   }
 
   function addRow() {
-    setFacts((current) => [
-      ...current,
+    commitFacts([
+      ...facts,
       {
         subject_path: '',
         metric: '',
@@ -107,17 +177,40 @@ export function TextStatsCandidates({ extraction, onImport, onAIEnhance, busy = 
   }
 
   function removeRow(index: number) {
-    setFacts((current) => current.filter((_, rowIndex) => rowIndex !== index))
+    commitFacts(facts.filter((_, rowIndex) => rowIndex !== index))
+  }
+
+  function resetFacts() {
+    if (onReset) {
+      onReset()
+    } else {
+      commitFacts(copyFacts(extraction.long.facts))
+    }
+    setTab('long')
+    setAiConsent(false)
+    setAiConfirmed(false)
+  }
+
+  function toggleAiConsent(checked: boolean) {
+    setAiConsent(checked)
+    if (!checked) setAiConfirmed(false)
   }
 
   return (
     <section className="text-stats-candidates">
       <div className="panel-title">
         <div>
-          <strong>文本统计候选</strong>
+          <strong>{t('importPage.document.textStats.title')}</strong>
           <p className="muted">
-            {extraction.char_count} 字符 · {extraction.paragraph_count} 段 · {facts.length} 条事实 ·{' '}
-            {extraction.extractor.method === 'rules' ? '本地规则' : extraction.extractor.method}
+            {t('importPage.document.textStats.summary', {
+              characters: extraction.char_count,
+              paragraphs: extraction.paragraph_count,
+              facts: facts.length,
+              method:
+                extraction.extractor.method === 'rules'
+                  ? t('importPage.document.textStats.methodRules')
+                  : extraction.extractor.method,
+            })}
           </p>
         </div>
         <span className="badge">{extraction.extractor.version}</span>
@@ -133,7 +226,11 @@ export function TextStatsCandidates({ extraction, onImport, onAIEnhance, busy = 
         </ul>
       ) : null}
 
-      <div className="tab-row" role="tablist" aria-label="文本统计视图">
+      <div
+        className="tab-row"
+        role="tablist"
+        aria-label={t('importPage.document.textStats.title')}
+      >
         <button
           className="tab"
           type="button"
@@ -141,7 +238,7 @@ export function TextStatsCandidates({ extraction, onImport, onAIEnhance, busy = 
           aria-selected={tab === 'long'}
           onClick={() => setTab('long')}
         >
-          长表
+          {t('importPage.document.textStats.longTab')}
         </button>
         <button
           className="tab"
@@ -150,7 +247,7 @@ export function TextStatsCandidates({ extraction, onImport, onAIEnhance, busy = 
           aria-selected={tab === 'wide'}
           onClick={() => setTab('wide')}
         >
-          宽表
+          {t('importPage.document.textStats.wideTab')}
         </button>
       </div>
 
@@ -160,92 +257,114 @@ export function TextStatsCandidates({ extraction, onImport, onAIEnhance, busy = 
             <table className="preview-table editable-table">
               <thead>
                 <tr>
-                  <th>导入</th>
-                  <th>主体</th>
-                  <th>指标</th>
-                  <th>数值</th>
-                  <th>单位</th>
-                  <th>备注</th>
-                  <th>操作</th>
+                  <th>{t('importPage.document.textStats.include')}</th>
+                  <th>{t('importPage.document.textStats.subject')}</th>
+                  <th>{t('importPage.document.textStats.metric')}</th>
+                  <th>{t('importPage.document.textStats.value')}</th>
+                  <th>{t('importPage.document.textStats.unit')}</th>
+                  <th>{t('importPage.document.textStats.note')}</th>
+                  <th>{t('importPage.document.textStats.source')}</th>
+                  <th>{t('importPage.document.textStats.actions')}</th>
                 </tr>
               </thead>
               <tbody>
-                {facts.map((fact, index) => (
-                  <tr key={`${fact.fact_id ?? 'row'}-${index}`}>
-                    <td>
-                      <input
-                        aria-label={`导入-${index}`}
-                        type="checkbox"
-                        checked={fact.include !== false}
-                        onChange={(event) =>
-                          updateFact(index, { include: event.target.checked })
-                        }
-                      />
-                    </td>
-                    <td>
-                      <input
-                        aria-label={`主体-${index}`}
-                        value={fact.subject_path}
-                        onChange={(event) =>
-                          updateFact(index, {
-                            subject_path: event.target.value,
-                            edited: true,
-                          })
-                        }
-                      />
-                    </td>
-                    <td>
-                      <input
-                        aria-label={`指标-${index}`}
-                        value={fact.metric}
-                        onChange={(event) =>
-                          updateFact(index, { metric: event.target.value, edited: true })
-                        }
-                      />
-                    </td>
-                    <td>
-                      <input
-                        aria-label={`数值-${index}`}
-                        value={cellText(valueOf(fact))}
-                        onChange={(event) => updateNumber(index, event.target.value)}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        aria-label={`单位-${index}`}
-                        value={fact.unit ?? ''}
-                        onChange={(event) =>
-                          updateFact(index, { unit: event.target.value, edited: true })
-                        }
-                      />
-                    </td>
-                    <td>
-                      <input
-                        aria-label={`备注-${index}`}
-                        value={fact.note ?? ''}
-                        onChange={(event) =>
-                          updateFact(index, { note: event.target.value, edited: true })
-                        }
-                      />
-                    </td>
-                    <td>
-                      <button
-                        className="button ghost small"
-                        type="button"
-                        aria-label={`删除-${index}`}
-                        onClick={() => removeRow(index)}
-                      >
-                        删除
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {facts.map((fact, index) => {
+                  const snippet = snippetOf(fact)
+                  const lineNo =
+                    typeof fact.source?.line_no === 'number' ? fact.source.line_no : null
+                  const page =
+                    typeof fact.source?.page === 'number' ? fact.source.page : null
+                  return (
+                    <tr key={`${fact.fact_id ?? 'row'}-${index}`}>
+                      <td>
+                        <input
+                          aria-label={`${t('importPage.document.textStats.include')}-${index}`}
+                          type="checkbox"
+                          checked={fact.include !== false}
+                          onChange={(event) =>
+                            updateFact(index, { include: event.target.checked })
+                          }
+                        />
+                      </td>
+                      <td>
+                        <input
+                          aria-label={`${t('importPage.document.textStats.subject')}-${index}`}
+                          value={fact.subject_path}
+                          onChange={(event) =>
+                            updateFact(index, {
+                              subject_path: event.target.value,
+                              edited: true,
+                            })
+                          }
+                        />
+                      </td>
+                      <td>
+                        <input
+                          aria-label={`${t('importPage.document.textStats.metric')}-${index}`}
+                          value={fact.metric}
+                          onChange={(event) =>
+                            updateFact(index, { metric: event.target.value, edited: true })
+                          }
+                        />
+                      </td>
+                      <td>
+                        <input
+                          aria-label={`${t('importPage.document.textStats.value')}-${index}`}
+                          value={cellText(valueOf(fact))}
+                          onChange={(event) => updateNumber(index, event.target.value)}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          aria-label={`${t('importPage.document.textStats.unit')}-${index}`}
+                          value={fact.unit ?? ''}
+                          onChange={(event) =>
+                            updateFact(index, { unit: event.target.value, edited: true })
+                          }
+                        />
+                      </td>
+                      <td>
+                        <input
+                          aria-label={`${t('importPage.document.textStats.note')}-${index}`}
+                          value={fact.note ?? ''}
+                          onChange={(event) =>
+                            updateFact(index, { note: event.target.value, edited: true })
+                          }
+                        />
+                      </td>
+                      <td data-testid={`fact-source-${index}`}>
+                        {snippet ? <span className="source-snippet">{snippet}</span> : null}
+                        <span className="muted source-locator">
+                          {page !== null
+                            ? t('importPage.document.textStats.pageSource', { page })
+                            : null}
+                          {lineNo !== null
+                            ? ` ${t('importPage.document.textStats.lineSource', { line: lineNo })}`
+                            : null}
+                        </span>
+                      </td>
+                      <td>
+                        <button
+                          className="button ghost small"
+                          type="button"
+                          aria-label={`${t('importPage.document.textStats.deleteRow')}-${index}`}
+                          onClick={() => removeRow(index)}
+                        >
+                          {t('importPage.document.textStats.deleteRow')}
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
           <div className="inline-form">
             <button className="button ghost" type="button" onClick={addRow}>
-              新增一行
+              {t('importPage.document.textStats.addRow')}
+            </button>
+            <button className="button" type="button" onClick={resetFacts}>
+              {t('importPage.document.textStats.reset')}
             </button>
             <button
               className="button"
@@ -253,7 +372,7 @@ export function TextStatsCandidates({ extraction, onImport, onAIEnhance, busy = 
               disabled={busy || included.length === 0}
               onClick={() => void onImport('long', included)}
             >
-              导入长表
+              {t('importPage.document.textStats.importLong')}
             </button>
             <button
               className="button"
@@ -261,14 +380,14 @@ export function TextStatsCandidates({ extraction, onImport, onAIEnhance, busy = 
               disabled={busy || included.length === 0}
               onClick={() => void onImport('wide', included)}
             >
-              导入宽表
+              {t('importPage.document.textStats.importWide')}
             </button>
           </div>
         </div>
       ) : (
         <div>
           {wide.rows.length === 0 ? (
-            <p className="muted">没有可预览的事实。</p>
+            <p className="muted">{t('importPage.document.textStats.noWideRows')}</p>
           ) : (
             <div className="table-wrap">
               <table className="preview-table">
@@ -298,7 +417,7 @@ export function TextStatsCandidates({ extraction, onImport, onAIEnhance, busy = 
               disabled={busy || included.length === 0}
               onClick={() => void onImport('wide', included)}
             >
-              导入宽表
+              {t('importPage.document.textStats.importWide')}
             </button>
             <button
               className="button"
@@ -306,7 +425,7 @@ export function TextStatsCandidates({ extraction, onImport, onAIEnhance, busy = 
               disabled={busy || included.length === 0}
               onClick={() => void onImport('long', included)}
             >
-              导入长表
+              {t('importPage.document.textStats.importLong')}
             </button>
           </div>
         </div>
@@ -316,23 +435,51 @@ export function TextStatsCandidates({ extraction, onImport, onAIEnhance, busy = 
         <div className="ai-consent">
           <label>
             <input
-              aria-label="允许 AI 增强"
+              aria-label={t('importPage.document.ai.enable')}
               type="checkbox"
               checked={aiConsent}
-              onChange={(event) => setAiConsent(event.target.checked)}
+              onChange={(event) => toggleAiConsent(event.target.checked)}
             />
-            允许 AI 增强
+            {t('importPage.document.ai.enable')}
           </label>
-          <p className="muted">
-            默认关闭。确认后只会发送含数字的原文片段与标题，AI 不得新增事实或修改数值。
-          </p>
+          <p className="muted">{t('importPage.document.ai.description')}</p>
+          {aiConsent ? (
+            <div className="ai-preview" data-testid="ai-preview">
+              <strong>{t('importPage.document.ai.previewTitle')}</strong>
+              {aiFacts.length > 0 ? (
+                <ul>
+                  {aiFacts.map((fact, index) => (
+                    <li key={fact.fact_id ?? index} data-testid={`ai-preview-item-${index}`}>
+                      <span>{snippetOf(fact)}</span>
+                      <span className="muted">
+                        {' · '}
+                        {fact.subject_path} · {fact.metric} · {cellText(valueOf(fact))}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="muted">{t('importPage.document.ai.previewEmpty')}</p>
+              )}
+              <label>
+                <input
+                  aria-label={t('importPage.document.ai.confirm')}
+                  type="checkbox"
+                  checked={aiConfirmed}
+                  disabled={aiFacts.length === 0}
+                  onChange={(event) => setAiConfirmed(event.target.checked)}
+                />
+                {t('importPage.document.ai.confirm')}
+              </label>
+            </div>
+          ) : null}
           <button
             className="button"
             type="button"
-            disabled={busy || !aiConsent || included.length === 0}
-            onClick={() => void onAIEnhance(included)}
+            disabled={busy || !aiConsent || !aiConfirmed || aiFacts.length === 0}
+            onClick={() => void onAIEnhance(aiFacts)}
           >
-            AI 增强
+            {t('importPage.document.ai.action')}
           </button>
         </div>
       ) : null}

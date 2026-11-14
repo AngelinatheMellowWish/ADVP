@@ -54,6 +54,9 @@ export function SystemStatusCard({
     if (value === 'degraded') return t('home.systemStatus.values.degraded')
     if (value === 'error') return t('home.systemStatus.values.error')
     if (value === 'unavailable') return t('home.systemStatus.values.unavailable')
+    if (value === 'configured') return t('home.systemStatus.values.configured')
+    if (value === 'missing') return t('home.systemStatus.values.missing')
+    if (value === 'available') return t('home.systemStatus.values.available')
     return value
   }
 
@@ -186,9 +189,19 @@ export function SystemStatusCard({
       ) : (
         <dl className="status-list">
           {rows.map((row) => (
-            <div className="status-row" key={row.key}>
+            <div
+              className="status-row"
+              key={row.key}
+              data-testid="system-status-row"
+              data-key={row.key}
+            >
               <dt>{row.label}</dt>
-              <dd className={`status-value status-value-${row.tone}`}>{row.value}</dd>
+              <dd
+                className={`status-value status-value-${row.tone}`}
+                data-tone={row.tone}
+              >
+                {row.value}
+              </dd>
             </div>
           ))}
         </dl>

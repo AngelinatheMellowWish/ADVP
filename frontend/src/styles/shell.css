@@ -1037,6 +1037,135 @@ a.taskbar-link:hover {
   gap: var(--space-4);
 }
 
+.analysis-charts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.analysis-chart-block h3 {
+  margin: 0 0 var(--space-2);
+  font-size: 14px;
+}
+
+.missing-bar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.missing-bar-row {
+  display: grid;
+  grid-template-columns: minmax(80px, 140px) 1fr auto;
+  gap: var(--space-2);
+  align-items: center;
+  font-size: 12px;
+}
+
+.missing-bar-track {
+  display: block;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--bg-base);
+  overflow: hidden;
+}
+
+.missing-bar-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #38bdf8, #f472b6);
+}
+
+.missing-bar-value {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.histogram-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.histogram-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.histogram-label {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.histogram-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 80px;
+  padding: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-base);
+}
+
+.histogram-bar {
+  flex: 1;
+  min-width: 4px;
+  border-radius: 3px 3px 0 0;
+  background: linear-gradient(180deg, #38bdf8, #2563eb);
+}
+
+.histogram-range {
+  font-size: 11px;
+}
+
+.ai-context-dialog {
+  width: min(760px, 100%);
+}
+
+.ai-context-metadata {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: var(--space-2) 0;
+  font-size: 13px;
+}
+
+.ai-context-metadata dt {
+  color: var(--text-secondary);
+}
+
+.ai-context-metadata dd {
+  margin: 0;
+}
+
+.ai-context-samples {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: var(--space-2) 0;
+  font-size: 13px;
+}
+
+.ai-context-sample-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.ai-context-policy {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
 @media (max-width: 1024px) {
   .data-layout {
     grid-template-columns: 1fr;

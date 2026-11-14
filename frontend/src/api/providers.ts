@@ -19,6 +19,9 @@ export type Provider = {
   output_price_per_million: number
   currency: string
   priority: number
+  max_concurrency: number
+  concurrency_wait_seconds: number
+  task_budget: number
   is_default: boolean
   egress_mode: EgressMode
   sample_rows: number
@@ -46,6 +49,9 @@ export type ProviderCreateInput = {
   output_price_per_million?: number
   currency?: string
   priority?: number
+  max_concurrency?: number
+  concurrency_wait_seconds?: number
+  task_budget?: number
   is_default?: boolean
   egress_mode?: EgressMode
   sample_rows?: number
@@ -67,6 +73,18 @@ export type ProviderTestResult = {
 export type ProviderModelsResult = {
   models: string[]
   latency_ms: number
+}
+
+export type ProviderUsageSummary = {
+  provider_id: string
+  days: number
+  requests: number
+  input_tokens: number
+  output_tokens: number
+  cached_tokens: number
+  estimated_cost: number
+  average_input_tokens: number
+  average_output_tokens: number
 }
 
 export type ProviderUsage = {
@@ -126,4 +144,19 @@ export async function listProviderUsage(
   limit = 20,
 ): Promise<ProviderUsage[]> {
   return request<ProviderUsage[]>(`/api/providers/${providerId}/usage?limit=${limit}`)
+}
+
+export async function getProviderUsageSummary(
+  providerId: string,
+  days = 7,
+): Promise<ProviderUsageSummary> {
+  return request<ProviderUsageSummary>(
+    `/api/providers/${providerId}/usage/summary?days=${days}`,
+  )
+}
+
+export async function clearProviderCredentials(): Promise<{ cleared: number }> {
+  return request<{ cleared: number }>('/api/providers/credentials?confirm=true', {
+    method: 'DELETE',
+  })
 }

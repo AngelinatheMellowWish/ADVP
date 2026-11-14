@@ -21,3 +21,7 @@ export async function updateSettings(
     body: JSON.stringify(input),
   })
 }
+
+export async function resetSettings(): Promise<Eu2Settings> {
+  return request<Eu2Settings>('/api/settings/reset', { method: 'POST' })
+}

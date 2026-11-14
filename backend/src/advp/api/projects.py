@@ -88,6 +88,8 @@ def _options(model: ImportOptionsModel) -> ImportOptions:
         raw_offset=model.raw_offset,
         sample_rows=model.sample_rows,
         preview_rows=model.preview_rows,
+        missing_values=model.missing_values,
+        type_overrides=model.type_overrides,
     )
 
 
@@ -515,6 +517,7 @@ def import_remote_dataset(
             filename=payload.filename,
             headers=payload.headers,
             auth=(payload.auth.model_dump(exclude_none=True) if payload.auth is not None else None),
+            timeout=payload.timeout,
             options=_options(payload.options),
         )
     except IngestError as exc:

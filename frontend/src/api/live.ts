@@ -30,6 +30,7 @@ export type LiveSessionInput = {
   ssl_ca_location?: string
   max_messages?: number
   sample_interval_ms?: number
+  timeout?: number
 }
 
 export async function createLiveSession(input: LiveSessionInput): Promise<LiveSession> {
@@ -59,12 +60,17 @@ export async function saveLiveSnapshot(
   sessionId: string,
   projectId: string,
   name?: string,
+  fieldMapping?: Record<string, string | null>,
 ): Promise<{ id: string; name: string; row_count: number }> {
   return request<{ id: string; name: string; row_count: number }>(
     `/api/streams/live/${sessionId}/snapshot`,
     {
       method: 'POST',
-      body: JSON.stringify({ project_id: projectId, name: name || null }),
+      body: JSON.stringify({
+        project_id: projectId,
+        name: name || null,
+        field_mapping: fieldMapping ?? null,
+      }),
     },
   )
 }

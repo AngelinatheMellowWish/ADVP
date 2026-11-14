@@ -104,3 +104,58 @@ def update_settings(
         return effective_settings(settings)
     except SettingsStorageError as exc:
         _read_failed(exc)
+
+
+@router.post("/reset", response_model=dict[str, SettingValue])
+def reset_settings(session: DbSession) -> dict[str, dict[str, Any]]:
+    """Reset editable settings to defaults while keeping ENV-controlled fields."""
+    settings = get_settings()
+    store = SettingsStore(settings.eu2_settings_file)
+    try:
+        stored = store.load()
+    except SettingsStorageError as exc:
+        _read_failed(exc)
+    kept = {name: value for name, value in stored.items() if env_override(name) is not None}
+    reset_fields = sorted(name for name in stored if name not in kept)
+
+    def _commit(_ordered: dict[str, Any]) -> None:
+        audit.record_event(
+            session,
+            "settings_reset",
+            target_type="settings",
+            detail={
+                "reset_fields": reset_fields,
+                "kept_env_fields": sorted(kept),
+            },
+        )
+
+    try:
+        store.replace_with_commit(kept, _commit)
+    except SettingsStorageError as exc:
+        _read_failed(exc)
+    except (ValueError, ValidationError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "invalid_settings", "message": str(exc)},
+        ) from exc
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "settings_write_failed",
+                "message": "settings could not be written",
+            },
+        ) from exc
+    except Exception as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "settings_audit_failed",
+                "message": "settings were rolled back because the audit write failed",
+            },
+        ) from exc
+    try:
+        return effective_settings(settings)
+    except SettingsStorageError as exc:
+        _read_failed(exc)

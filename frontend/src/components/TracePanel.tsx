@@ -1,11 +1,18 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import {
   listPipelineRuns,
   type PipelineRun,
   type PipelineRunSummary,
 } from '../api/pipelines'
+import {
+  listPipelineEvents,
+  type PipelineEvent,
+} from '../api/pipelineEvents'
 import { errorMessage } from '../api/projects'
+import { AuditPanel } from './AuditPanel'
+import { TraceCostTimeline } from './TraceCostTimeline'
 import {
   compareRuns,
   getSelectionCode,
@@ -25,7 +32,12 @@ export function TracePanel({
   run: PipelineRun
   onRunChanged: (run: PipelineRun) => void
 }) {
+  const { t } = useTranslation()
   const [trace, setTrace] = useState<TracePayload | null>(null)
+  const [events, setEvents] = useState<PipelineEvent[]>([])
+  const [logLevel, setLogLevel] = useState('all')
+  const [logStep, setLogStep] = useState('')
+  const [logKeyword, setLogKeyword] = useState('')
   const [runs, setRuns] = useState<PipelineRunSummary[]>([])
   const [compareId, setCompareId] = useState('')
   const [comparison, setComparison] = useState<RunComparison | null>(null)
@@ -51,6 +63,13 @@ export function TracePanel({
       })
       .catch(() => {
         if (!cancelled) setRuns([])
+      })
+    listPipelineEvents(run.id)
+      .then((items) => {
+        if (!cancelled) setEvents(Array.isArray(items) ? items : [])
+      })
+      .catch(() => {
+        if (!cancelled) setEvents([])
       })
     return () => {
       cancelled = true
@@ -118,6 +137,27 @@ export function TracePanel({
     }
   }
 
+  function eventLevel(event: PipelineEvent): 'info' | 'warn' | 'error' {
+    if (event.type.endsWith('_failed') || event.payload.error) return 'error'
+    if (event.type === 'run_paused' || event.type === 'run_cancelled') return 'warn'
+    return 'info'
+  }
+
+  const keyword = logKeyword.trim().toLowerCase()
+  const stepNeedle = logStep.trim().toLowerCase()
+  const filteredEvents = events.filter((event) => {
+    if (logLevel !== 'all' && eventLevel(event) !== logLevel) return false
+    const step = typeof event.payload.key === 'string' ? event.payload.key : ''
+    if (stepNeedle && !step.toLowerCase().includes(stepNeedle)) return false
+    if (
+      keyword &&
+      !`${event.type} ${JSON.stringify(event.payload)}`.toLowerCase().includes(keyword)
+    ) {
+      return false
+    }
+    return true
+  })
+
   return (
     <section className="trace-panel" aria-label="追溯与血缘" data-testid="trace-panel">
       <div className="panel-title">
@@ -170,6 +210,12 @@ export function TracePanel({
               </strong>
             </span>
           </div>
+
+          <TraceCostTimeline
+            nodes={trace.nodes}
+            totalCost={trace.summary.estimated_cost}
+            currency={trace.summary.currency}
+          />
 
           <h4>数据血缘</h4>
           {trace.lineage.length ? (
@@ -230,6 +276,57 @@ export function TracePanel({
               </li>
             ))}
           </ol>
+
+          <section className="trace-log-panel" data-testid="trace-log-panel">
+            <h4>{t('tracePage.logs.title')}</h4>
+            <div className="inline-form">
+              <label>
+                {t('tracePage.logs.level')}
+                <select
+                  data-testid="log-filter-level"
+                  value={logLevel}
+                  onChange={(event) => setLogLevel(event.target.value)}
+                >
+                  <option value="all">{t('tracePage.logs.all')}</option>
+                  <option value="info">{t('tracePage.logs.info')}</option>
+                  <option value="warn">{t('tracePage.logs.warn')}</option>
+                  <option value="error">{t('tracePage.logs.error')}</option>
+                </select>
+              </label>
+              <label>
+                {t('tracePage.logs.step')}
+                <input
+                  data-testid="log-filter-step"
+                  value={logStep}
+                  onChange={(event) => setLogStep(event.target.value)}
+                />
+              </label>
+              <label>
+                {t('tracePage.logs.keyword')}
+                <input
+                  data-testid="log-filter-keyword"
+                  value={logKeyword}
+                  onChange={(event) => setLogKeyword(event.target.value)}
+                />
+              </label>
+            </div>
+            {filteredEvents.length > 0 ? (
+              <ul className="trace-log-list" data-testid="trace-log-list">
+                {filteredEvents.map((event) => (
+                  <li key={event.id} data-testid="trace-log-row">
+                    <span className="badge">{event.seq}</span>{' '}
+                    <strong>{event.type}</strong>{' '}
+                    <span className={`badge ${eventLevel(event)}`}>
+                      {eventLevel(event)}
+                    </span>{' '}
+                    <code>{JSON.stringify(event.payload)}</code>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted">{t('tracePage.logs.noEvents')}</p>
+            )}
+          </section>
 
           <h4>运行对比</h4>
           <label className="inline-form">
@@ -298,6 +395,8 @@ export function TracePanel({
               <pre className="json-preview">{code.diff || code.code}</pre>
             </div>
           ) : null}
+
+          <AuditPanel projectId={trace.run.project_id} />
         </>
       ) : (
         <p className="muted">正在加载追溯信息…</p>

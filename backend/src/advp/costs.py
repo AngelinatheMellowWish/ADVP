@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -229,6 +229,38 @@ def cost_summary(
         "by_run": _items(by_run),
         "by_chart": _items(by_chart),
         "budget": check_budget(session, project_id).to_dict(),
+    }
+
+
+def provider_usage_summary(
+    session: Session,
+    provider_id: str,
+    *,
+    days: int = 7,
+) -> dict[str, Any]:
+    """Return recent provider usage plus average tokens per request."""
+    cutoff = datetime.now(UTC) - timedelta(days=max(1, days))
+    rows = [
+        row
+        for row in session.scalars(
+            select(LlmUsage).where(LlmUsage.provider_id == provider_id)
+        ).all()
+        if _aware(row.created_at) >= cutoff
+    ]
+    requests = len(rows)
+    input_tokens = sum(int(row.input_tokens) for row in rows)
+    output_tokens = sum(int(row.output_tokens) for row in rows)
+    cached_tokens = sum(int(row.cached_tokens) for row in rows)
+    return {
+        "provider_id": provider_id,
+        "days": max(1, days),
+        "requests": requests,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cached_tokens": cached_tokens,
+        "estimated_cost": round(sum(float(row.estimated_cost) for row in rows), 8),
+        "average_input_tokens": round(input_tokens / requests, 2) if requests else 0.0,
+        "average_output_tokens": round(output_tokens / requests, 2) if requests else 0.0,
     }
 
 
