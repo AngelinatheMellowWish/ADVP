@@ -62,6 +62,8 @@ export function VtkScene({
   clipping = false,
   transferFunction,
   onScreenshot,
+  screenshotToken = 0,
+  resetToken = 0,
 }: {
   geometry: GeometryPayload
   colormap?: string
@@ -69,9 +71,13 @@ export function VtkScene({
   clipping?: boolean
   transferFunction?: SceneTransferFunction
   onScreenshot?: (dataUrl: string) => void
+  screenshotToken?: number
+  resetToken?: number
 }) {
   const container = useRef<HTMLDivElement>(null)
   const refs = useRef<VtkRefs | null>(null)
+  const lastScreenshot = useRef(0)
+  const lastReset = useRef(0)
   const [error, setError] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
 
@@ -296,24 +302,26 @@ export function VtkScene({
     }
   }, [ready])
 
-  function screenshot() {
+  useEffect(() => {
+    if (!screenshotToken || !ready) return
+    if (screenshotToken === lastScreenshot.current) return
+    lastScreenshot.current = screenshotToken
     const canvas = container.current?.querySelector('canvas')
     if (!canvas) return
     onScreenshot?.(canvas.toDataURL('image/png'))
-  }
+  }, [screenshotToken, ready, onScreenshot])
+
+  useEffect(() => {
+    if (!resetToken || !ready || !refs.current) return
+    if (resetToken === lastReset.current) return
+    lastReset.current = resetToken
+    refs.current.generic.getRenderer().resetCamera()
+    refs.current.renderWindow.render()
+  }, [resetToken, ready])
 
   return (
     <div className="vtk-scene-block">
       {error ? <p className="error">{error}</p> : null}
-      <div className="inline-form">
-        <button className="button" onClick={screenshot} disabled={!ready}>
-          保存截图
-        </button>
-        <span className="muted">
-          {geometry.mode} · {geometry.sampled ? `LOD ${geometry.lod ?? 1}` : '原始'}
-          {geometry.display_shape ? ` · ${geometry.display_shape.join(' × ')}` : ''}
-        </span>
-      </div>
       <div className="vtk-scene" ref={container} data-testid="vtk-scene" />
     </div>
   )

@@ -26,22 +26,51 @@ export function QualityPanel({ dataset, onChanged }: QualityPanelProps) {
   const [preview, setPreview] = useState<QualityApplyResponse | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [applying, setApplying] = useState(false)
+  const [previewMode, setPreviewMode] = useState<'apply' | 'impact'>('apply')
   const [error, setError] = useState<string | null>(null)
   const ignored = new Set(dataset.ignored_issues ?? [])
   const issues = (dataset.profile.issues ?? []).filter((issue) => !ignored.has(issue.code))
+  const severityCounts = { blocking: 0, warning: 0, info: 0 }
+  for (const issue of issues) {
+    severityCounts[issue.severity] += 1
+  }
+  const sensitiveCount = (dataset.profile.summary?.sensitive_columns ?? []).length
+  const reportText = [
+    t('quality.reportTitle'),
+    t('quality.reportScore', { score: dataset.quality_score }),
+    t('quality.reportIssues', severityCounts),
+    t('quality.reportSensitive', { count: sensitiveCount }),
+    ...issues.map((issue) => {
+      const severity = t(`quality.severity.${issue.severity}`, {
+        defaultValue: issue.severity,
+      })
+      return `${severity}: ${issue.message}${
+        issue.suggestion ? ` — ${issue.suggestion}` : ''
+      }`
+    }),
+  ].join('\n')
 
-  async function handleApply(issue: ProfileIssue) {
+  async function loadPreview(issue: ProfileIssue, mode: 'apply' | 'impact') {
     setBusy(`apply-${issue.code}`)
     setError(null)
     try {
       setPreview(
         await applyQualitySuggestion(dataset.id, issue.code, issue.column ?? null),
       )
+      setPreviewMode(mode)
     } catch (caught) {
       setError(`${t('quality.failed')} ${errorMessage(caught)}`)
     } finally {
       setBusy(null)
     }
+  }
+
+  function handleApply(issue: ProfileIssue) {
+    return loadPreview(issue, 'apply')
+  }
+
+  function handleImpact(issue: ProfileIssue) {
+    return loadPreview(issue, 'impact')
   }
 
   async function handleIgnore(issue: ProfileIssue) {
@@ -81,6 +110,15 @@ export function QualityPanel({ dataset, onChanged }: QualityPanelProps) {
         </span>
       </div>
 
+      <textarea
+        className="quality-report"
+        data-testid="quality-report-text"
+        aria-label={t('quality.reportLabel')}
+        value={reportText}
+        readOnly
+        rows={5}
+      />
+
       {error ? (
         <p className="error-text" role="alert">
           {error}
@@ -112,15 +150,26 @@ export function QualityPanel({ dataset, onChanged }: QualityPanelProps) {
               ) : null}
               <div className="quality-issue-actions">
                 {ACTIONABLE.has(issue.code) ? (
-                  <button
-                    className="btn"
-                    type="button"
-                    aria-label={`${t('quality.apply')} ${issue.code}`}
-                    onClick={() => handleApply(issue)}
-                    disabled={busy === `apply-${issue.code}`}
-                  >
-                    {t('quality.apply')}
-                  </button>
+                  <>
+                    <button
+                      className="btn"
+                      type="button"
+                      aria-label={`${t('quality.viewImpact')} ${issue.code}`}
+                      onClick={() => handleImpact(issue)}
+                      disabled={busy === `apply-${issue.code}`}
+                    >
+                      {t('quality.viewImpact')}
+                    </button>
+                    <button
+                      className="btn"
+                      type="button"
+                      aria-label={`${t('quality.apply')} ${issue.code}`}
+                      onClick={() => handleApply(issue)}
+                      disabled={busy === `apply-${issue.code}`}
+                    >
+                      {t('quality.apply')}
+                    </button>
+                  </>
                 ) : (
                   <span className="muted">{t('quality.noSuggestion')}</span>
                 )}
@@ -155,6 +204,24 @@ export function QualityPanel({ dataset, onChanged }: QualityPanelProps) {
                 affected: preview.affected_rows,
               })}
             </p>
+            <div className="quality-impact" data-testid="quality-impact">
+              <p>
+                {t('quality.impactSummary', {
+                  before: preview.before_rows,
+                  after: preview.after_rows,
+                  affected: preview.affected_rows,
+                })}
+              </p>
+              <p>
+                {t('quality.impactColumns', {
+                  columns:
+                    preview.columns.length > 0
+                      ? preview.columns.join(', ')
+                      : t('quality.noColumns'),
+                })}
+              </p>
+              <p>{t('quality.impactSample', { count: preview.preview.length })}</p>
+            </div>
             <ul className="quality-steps">
               {preview.steps.map((step, index) => (
                 <li key={index}>
@@ -183,16 +250,18 @@ export function QualityPanel({ dataset, onChanged }: QualityPanelProps) {
                 onClick={() => setPreview(null)}
                 disabled={applying}
               >
-                {t('common.cancel')}
+                {previewMode === 'impact' ? t('common.close') : t('common.cancel')}
               </button>
-              <button
-                className="btn home-primary"
-                type="button"
-                onClick={confirmApply}
-                disabled={applying}
-              >
-                {applying ? t('quality.applying') : t('quality.confirm')}
-              </button>
+              {previewMode === 'apply' ? (
+                <button
+                  className="btn home-primary"
+                  type="button"
+                  onClick={confirmApply}
+                  disabled={applying}
+                >
+                  {applying ? t('quality.applying') : t('quality.confirm')}
+                </button>
+              ) : null}
             </div>
           </div>
         </div>

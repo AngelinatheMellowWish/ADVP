@@ -253,12 +253,19 @@ def _type_conflict(series: pl.Series) -> bool:
     return 0.05 <= ratio <= 0.95 and numeric >= 2 and len(values) - numeric >= 2
 
 
-def _column_profile(series: pl.Series, name: str) -> dict[str, Any]:
+def _column_profile(
+    series: pl.Series,
+    name: str,
+    sensitive_columns: set[str] | None = None,
+) -> dict[str, Any]:
     rows = series.len()
     null_count = int(series.null_count())
     unique_count = int(series.drop_nulls().n_unique())
     semantic_type = infer_semantic_type(series, name)
     sensitive, kind = detect_sensitive(series, name, semantic_type)
+    if sensitive_columns is not None:
+        sensitive = name in sensitive_columns
+        kind = kind if sensitive else None
     dtype = _dtype_name(series)
     stats: dict[str, Any] = {}
     if dtype.startswith(("Int", "UInt", "Float", "Decimal")):
@@ -327,6 +334,7 @@ def profile_frame(
     sample_rows: int,
     row_count: int,
     row_count_estimated: bool,
+    sensitive_columns: set[str] | None = None,
 ) -> dict[str, Any]:
     """Build column statistics and a severity-classified quality report."""
     issues: list[dict[str, Any]] = []
@@ -352,7 +360,7 @@ def profile_frame(
 
     for name in frame.columns:
         series = frame[name]
-        profile = _column_profile(series, name)
+        profile = _column_profile(series, name, sensitive_columns)
         columns.append(profile)
         if frame.height and profile["null_count"] == frame.height:
             _append_issue(
@@ -446,7 +454,7 @@ def profile_frame(
         counts[severity] = counts.get(severity, 0) + 1
     penalty = counts["blocking"] * 40 + counts["warning"] * 8 + counts["info"] * 1
     quality_score = 0 if counts["blocking"] else max(0, 100 - min(80, penalty))
-    sensitive_columns = [column["name"] for column in columns if column["sensitive"]]
+    sensitive_names = [column["name"] for column in columns if column["sensitive"]]
     missing_cells = sum(int(column["null_count"]) for column in columns)
     return {
         "quality_score": quality_score,
@@ -459,7 +467,7 @@ def profile_frame(
         "issues": issues,
         "summary": {
             "missing_cells": missing_cells,
-            "sensitive_columns": sensitive_columns,
+            "sensitive_columns": sensitive_names,
             "issue_counts": counts,
         },
     }

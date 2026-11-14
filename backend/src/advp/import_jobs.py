@@ -500,6 +500,8 @@ def _import_options(raw: Any) -> ImportOptions:
         raw_offset=int(data.get("raw_offset") or 0),
         sample_rows=int(data.get("sample_rows") or MAX_SAMPLE_ROWS),
         preview_rows=int(data.get("preview_rows") or 20),
+        missing_values=data.get("missing_values"),
+        type_overrides=data.get("type_overrides"),
     )
 
 

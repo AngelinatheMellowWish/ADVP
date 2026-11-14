@@ -1,4 +1,4 @@
-import { request, requestForm } from './projects'
+import { request, requestForm, type ImportOptionsInput } from './projects'
 
 export type ImportJobStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 
@@ -61,7 +61,7 @@ export async function createImportJob(
   projectId: string,
   path: string,
   name?: string,
-  options?: Record<string, unknown>,
+  options?: ImportOptionsInput,
 ): Promise<ImportJobDetail> {
   return request<ImportJobDetail>(`/api/projects/${projectId}/import-jobs`, {
     method: 'POST',

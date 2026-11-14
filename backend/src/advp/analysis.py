@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import threading
 from datetime import UTC, datetime
 from typing import Any
 
@@ -17,6 +18,9 @@ from advp.models import Dataset
 ANALYSIS_SAMPLE_ROWS = 10_000
 MAX_ANALYSIS_ROWS = 100_000
 ANALYSIS_VERSION = 1
+_ANALYSIS_SEMAPHORE_LOCK = threading.Lock()
+_ANALYSIS_SEMAPHORE: threading.BoundedSemaphore | None = None
+_ANALYSIS_SEMAPHORE_SIZE = 0
 
 
 class AnalysisError(Exception):
@@ -109,11 +113,23 @@ def compute_and_store(
     force: bool = False,
 ) -> dict[str, Any]:
     """Compute and persist the analysis block in the dataset profile JSON."""
-    analysis = analyze_dataset(dataset, force=force)
+    with _analysis_semaphore():
+        analysis = analyze_dataset(dataset, force=force)
     dataset.profile_json = {**(dataset.profile_json or {}), "analysis": analysis}
     session.commit()
     session.refresh(dataset)
     return analysis
+
+
+def _analysis_semaphore() -> threading.BoundedSemaphore:
+    """Return a semaphore sized by the current analysis-concurrency setting."""
+    global _ANALYSIS_SEMAPHORE, _ANALYSIS_SEMAPHORE_SIZE
+    size = int(runtime_setting(get_settings(), "analysis_concurrency"))
+    with _ANALYSIS_SEMAPHORE_LOCK:
+        if _ANALYSIS_SEMAPHORE is None or size != _ANALYSIS_SEMAPHORE_SIZE:
+            _ANALYSIS_SEMAPHORE = threading.BoundedSemaphore(size)
+            _ANALYSIS_SEMAPHORE_SIZE = size
+        return _ANALYSIS_SEMAPHORE
 
 
 def _numeric_analysis(

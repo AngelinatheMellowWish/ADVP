@@ -15,8 +15,10 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from advp import __version__, import_jobs, render3d
 from advp.api.audit import router as audit_router
+from advp.api.calculated import router as calculated_router
 from advp.api.charts import router as charts_router
 from advp.api.cleaning import router as cleaning_router
+from advp.api.cleanup import router as cleanup_router
 from advp.api.costs import router as costs_router
 from advp.api.datasets import router as datasets_router
 from advp.api.diagnostics import router as diagnostics_router
@@ -110,6 +112,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router, prefix="/api")
     app.include_router(session_router, prefix="/api")
     app.include_router(settings_router, prefix="/api")
+    app.include_router(cleanup_router, prefix="/api")
     app.include_router(system_router, prefix="/api")
     app.include_router(status_router, prefix="/api")
     app.include_router(tasks_router, prefix="/api")
@@ -119,6 +122,7 @@ def create_app() -> FastAPI:
     app.include_router(sample_router, prefix="/api")
     app.include_router(projects_router, prefix="/api")
     app.include_router(datasets_router, prefix="/api")
+    app.include_router(calculated_router, prefix="/api")
     app.include_router(files_router, prefix="/api")
     app.include_router(charts_router, prefix="/api")
     app.include_router(geometry3d_router, prefix="/api")

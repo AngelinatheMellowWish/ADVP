@@ -11,11 +11,19 @@ import {
   type DatasetDetail,
 } from '../api/projects'
 import {
+  getPipelineRun,
+  getReportManifest,
+  listPipelineRuns,
+  regeneratePipelineReport,
+  type ReportSection,
+} from '../api/pipelines'
+import {
   correctChartSelection,
   createChartSelection,
   type ChartSelectionResult,
 } from '../api/selections'
 import { useProject } from '../app/projectContext'
+import { CalculatedFieldDialog } from '../components/CalculatedFieldDialog'
 import { ChartConfigPanel } from '../components/ChartConfigPanel'
 import { ChartFigure } from '../components/ChartFigure'
 import { ChartTabs } from '../components/ChartTabs'
@@ -42,6 +50,59 @@ const INTENTS: Intent[] = [
   'composition',
   'timeline',
 ]
+
+const SCORING_DIMENSIONS = [
+  'data_fit',
+  'perceptual',
+  'info_density',
+  'readability',
+  'performance',
+  'accessibility',
+  'scientific_compliance',
+] as const
+
+function chartName(name: { zh: string; en: string }, language: string): string {
+  return language.startsWith('zh') ? name.zh : name.en
+}
+
+function ScoringCard({ result }: { result: ChartSelectionResult }) {
+  const { t, i18n } = useTranslation()
+  return (
+    <section
+      className="card scoring-card"
+      data-testid="scoring-card"
+      aria-label={t('chartsPage.scoring.title')}
+    >
+      <h3>{t('chartsPage.scoring.title')}</h3>
+      <p className="muted">
+        {t('chartsPage.scoring.total', {
+          score: result.selected.score.toFixed(3),
+        })}
+      </p>
+      <ul className="scoring-dimensions">
+        {SCORING_DIMENSIONS.map((key) => (
+          <li key={key} data-dimension={key}>
+            <span>{t(`chartsPage.scoring.dimensions.${key}`)}</span>
+            <span>{(result.selected.dimensions[key] ?? 0).toFixed(3)}</span>
+          </li>
+        ))}
+      </ul>
+      <p>
+        <strong>{t('chartsPage.scoring.reason')}</strong>:{' '}
+        {result.selected.reason}
+      </p>
+      <ol className="top3-list" data-testid="scoring-top3">
+        {result.top3.map((entry) => (
+          <li key={entry.chart_id} className={entry.selected ? 'selected' : ''}>
+            <strong>{chartName(entry.name, i18n.language)}</strong>
+            <span className="muted"> · {entry.score.toFixed(3)}</span>
+            <p className="muted">{entry.reason}</p>
+          </li>
+        ))}
+      </ol>
+    </section>
+  )
+}
 
 function dataKind(dataset: DatasetDetail): string {
   return dataset.kind === 'table' || dataset.kind === 'array' ? dataset.kind : dataset.kind
@@ -95,6 +156,9 @@ function P05ChartsWorkbench() {
   const [error, setError] = useState<string | null>(null)
   const [pickedField, setPickedField] = useState<string | null>(null)
   const [showTable, setShowTable] = useState(false)
+  const [showCalculated, setShowCalculated] = useState(false)
+  const [reportBusy, setReportBusy] = useState(false)
+  const [reportMessage, setReportMessage] = useState<string | null>(null)
 
   const [intent, setIntent] = useState<Intent | ''>('')
   const [aiResult, setAiResult] = useState<ChartSelectionResult | null>(null)
@@ -190,6 +254,7 @@ function P05ChartsWorkbench() {
   }, [families, family, familyCharts, activeTab.draft.chartId, editor])
 
   const activeSelectionId = corrected?.id ?? activeTab.selectionId ?? null
+  const scoringResult = corrected ?? aiResult
 
   function pickChart(chartId: string) {
     if (chartId === activeTab.draft.chartId) return
@@ -283,6 +348,65 @@ function P05ChartsWorkbench() {
     editor.setChart(aiResult.selected.chart_id, aiResult.selected.fields)
     editor.setAggregation(aiResult.selected.aggregation ?? '')
     editor.setSelectionId(aiResult.id)
+  }
+
+  async function addToReport() {
+    if (!dataset || !activeSelectionId) return
+    setReportBusy(true)
+    setError(null)
+    setReportMessage(null)
+    try {
+      let targetRunId = params.get('run')
+      if (!targetRunId) {
+        const runs = await listPipelineRuns(dataset.id)
+        targetRunId = runs[0]?.id ?? null
+      }
+      if (!targetRunId) {
+        setError(t('chartsPage.addToReportNoRun'))
+        return
+      }
+      let existing: string[] = []
+      let language: 'zh' | 'en' = 'zh'
+      let template: 'standard' | 'compact' = 'standard'
+      let outline: ReportSection[] | undefined
+      try {
+        const detail = await getPipelineRun(targetRunId)
+        const stored = detail.options.chart_selection_ids
+        if (Array.isArray(stored)) existing = stored.map(String)
+        if (detail.options.report_language === 'en') language = 'en'
+        if (detail.options.report_template === 'compact') template = 'compact'
+      } catch {
+        // The manifest below is authoritative when available.
+      }
+      try {
+        const manifest = await getReportManifest(targetRunId)
+        if (Array.isArray(manifest.chart_selection_ids)) {
+          existing = manifest.chart_selection_ids.map(String)
+        }
+        if (manifest.language) language = manifest.language
+        if (manifest.template) template = manifest.template
+        if (Array.isArray(manifest.outline) && manifest.outline.length > 0) {
+          outline = manifest.outline
+        }
+      } catch {
+        // A run without a report yet still accepts the first chart.
+      }
+      const ids = existing.includes(activeSelectionId)
+        ? existing
+        : [...existing, activeSelectionId]
+      await regeneratePipelineReport(targetRunId, {
+        language,
+        template,
+        include_chart: true,
+        outline,
+        chart_selection_ids: ids,
+      })
+      setReportMessage(t('chartsPage.addToReportDone'))
+    } catch (caught) {
+      setError(errorMessage(caught))
+    } finally {
+      setReportBusy(false)
+    }
   }
 
   function tabLabel(tab: ChartTab): string {
@@ -407,6 +531,14 @@ function P05ChartsWorkbench() {
             {showTable ? t('chartsPage.hideTable') : t('chartsPage.showTable')}
           </button>
           <button
+            className="btn"
+            type="button"
+            onClick={() => setShowCalculated(true)}
+            disabled={!dataset || dataset.kind !== 'table'}
+          >
+            {t('chartsPage.calculatedField.open')}
+          </button>
+          <button
             className="btn home-primary"
             type="button"
             onClick={() => void renderChart()}
@@ -513,6 +645,7 @@ function P05ChartsWorkbench() {
             >
               {aiBusy ? t('chartsPage.aiRunning') : t('chartsPage.runAi')}
             </button>
+            {scoringResult ? <ScoringCard result={scoringResult} /> : null}
             {aiResult ? (
               <div className="chart-ai-result" data-testid="chart-ai-result">
                 <p>
@@ -560,11 +693,37 @@ function P05ChartsWorkbench() {
           {activeSelectionId ? (
             <section className="card" aria-label={t('chartsPage.export')}>
               <h2>{t('chartsPage.export')}</h2>
+              <button
+                className="btn home-primary"
+                type="button"
+                onClick={() => void addToReport()}
+                disabled={reportBusy || !dataset}
+              >
+                {reportBusy ? t('chartsPage.addingToReport') : t('chartsPage.addToReport')}
+              </button>
+              {reportMessage ? <p className="notice">{reportMessage}</p> : null}
               <ExportPanel selectionId={activeSelectionId} />
             </section>
           ) : null}
         </div>
       </div>
+
+      {showCalculated && dataset ? (
+        <CalculatedFieldDialog
+          datasetId={dataset.id}
+          columns={dataset.schema_definition.columns}
+          onApplied={(result) => {
+            setDataset(result.dataset)
+            setCandidates(null)
+            setError(null)
+          }}
+          onUndone={(result) => {
+            setDataset(result.dataset)
+            setError(null)
+          }}
+          onClose={() => setShowCalculated(false)}
+        />
+      ) : null}
     </section>
   )
 }

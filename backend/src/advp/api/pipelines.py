@@ -7,7 +7,7 @@ import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, Literal, NoReturn
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Response
 from fastapi.responses import FileResponse, StreamingResponse
@@ -24,6 +24,7 @@ from advp.api.schemas import (
     PipelineRunSummary,
     ReportRegenerate,
 )
+from advp.charts import render as render_service
 from advp.db import get_session
 from advp.llm import providers as provider_service
 from advp.models import ChartSelection, Dataset, PipelineRun
@@ -97,6 +98,68 @@ def _normalized_outline(outline: list[str] | None) -> list[str]:
         ) from exc
 
 
+def _normalized_custom_sections(
+    custom_sections: list[dict[str, Any]] | None,
+    outline: list[str],
+) -> list[dict[str, Any]] | None:
+    if custom_sections is None:
+        return None
+    try:
+        return report_service.normalize_custom_sections(
+            custom_sections,
+            section_count=len(outline),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "invalid_report_custom_section", "message": str(exc)},
+        ) from exc
+
+
+def _resolve_report_selections(
+    session: Session,
+    run: PipelineRun,
+    selection_ids: list[str],
+) -> list[ChartSelection]:
+    resolved: list[ChartSelection] = []
+    seen: set[str] = set()
+    for raw in selection_ids:
+        selection_id = str(raw).strip()
+        if not selection_id or selection_id in seen:
+            continue
+        selection = session.get(ChartSelection, selection_id)
+        if selection is None or selection.project_id != run.project_id:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "report_chart_not_found",
+                    "message": f"chart selection was not found in this project: {selection_id}",
+                },
+            )
+        try:
+            render_service.render_selection(session, selection)
+        except render_service.RenderError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "report_chart_unrenderable",
+                    "message": str(exc),
+                    "hint": "Check the dataset preview and chart fields before adding the chart.",
+                },
+            ) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "report_chart_unrenderable",
+                    "message": f"chart selection could not be rendered: {exc}",
+                },
+            ) from exc
+        seen.add(selection_id)
+        resolved.append(selection)
+    return resolved
+
+
 def _regenerate_report(
     session: Session,
     run: PipelineRun,
@@ -106,6 +169,8 @@ def _regenerate_report(
     conclusion: str | None = None,
     include_chart: bool = True,
     outline: list[str] | None = None,
+    chart_selection_ids: list[str] | None = None,
+    custom_sections: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     steps = list_steps(session, run.id)
     working_id = str(run.options.get("working_dataset_id") or run.dataset_id)
@@ -115,9 +180,46 @@ def _regenerate_report(
             status_code=404,
             detail={"code": "dataset_not_found", "message": "working dataset was not found"},
         )
+    if custom_sections is None:
+        stored_custom = run.options.get("custom_sections")
+        if not isinstance(stored_custom, list):
+            stored_custom = run.options.get("report_custom_sections")
+        custom_sections = stored_custom if isinstance(stored_custom, list) else []
+    try:
+        normalized_custom_sections = report_service.normalize_custom_sections(
+            custom_sections,
+            section_count=len(report_service.normalize_outline(outline)),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "invalid_report_custom_section", "message": str(exc)},
+        ) from exc
+    run.options = {
+        **run.options,
+        "custom_sections": normalized_custom_sections,
+        "report_custom_sections": normalized_custom_sections,
+    }
     prior = {item.key: item.output_json for item in steps if item.status == "succeeded"}
-    selection_id = (prior.get("selection") or {}).get("selection_id")
-    selection = session.get(ChartSelection, str(selection_id)) if selection_id is not None else None
+    requested_ids = chart_selection_ids
+    if requested_ids is None:
+        stored_ids = run.options.get("chart_selection_ids")
+        requested_ids = stored_ids if isinstance(stored_ids, list) else None
+    selections: list[ChartSelection]
+    if requested_ids is not None:
+        selections = _resolve_report_selections(
+            session,
+            run,
+            [str(item) for item in requested_ids],
+        )
+        run.options = {**run.options, "chart_selection_ids": [item.id for item in selections]}
+    else:
+        selection_id = (prior.get("selection") or {}).get("selection_id")
+        legacy = (
+            session.get(ChartSelection, str(selection_id)) if selection_id is not None else None
+        )
+        selections = [legacy] if legacy is not None else []
+    selection = selections[0] if selections else None
     chart_image = None
     chart_error = None
     if include_chart and selection is not None:
@@ -138,6 +240,8 @@ def _regenerate_report(
         chart_image=chart_image,
         chart_note=chart_error,
         outline=outline,
+        chart_selections=selections,
+        custom_sections=normalized_custom_sections,
     )
     step = next((item for item in steps if item.key == "report"), None)
     if step is not None:
@@ -157,6 +261,9 @@ def _regenerate_report(
             "language": language,
             "template": template,
             "outline": bundle["manifest"]["outline"],
+            "custom_sections": bundle["manifest"]["custom_sections"],
+            "manifest_schema_version": bundle["manifest"]["manifest_schema_version"],
+            "chart_selection_ids": bundle["manifest"]["chart_selection_ids"],
         }
         session.commit()
     search.safe_index_report(session, run, Path(str(bundle["md_path"])).read_text(encoding="utf-8"))
@@ -185,6 +292,19 @@ def create_pipeline_run(
             },
         )
     options = payload.model_dump(exclude={"auto_start"}, exclude_none=True)
+    if payload.report_custom_sections is not None:
+        try:
+            normalized_custom_sections = report_service.normalize_custom_sections(
+                payload.report_custom_sections,
+                section_count=len(report_service.normalize_outline(None)),
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "invalid_report_custom_section", "message": str(exc)},
+            ) from exc
+        options["report_custom_sections"] = normalized_custom_sections
+        options["custom_sections"] = normalized_custom_sections
     run = create_run(session, dataset, options=options)
     if payload.auto_start:
         background_tasks.add_task(run_pipeline, run.id)
@@ -210,14 +330,21 @@ EVENT_POLL_SECONDS = 0.5
 EVENT_HEARTBEAT_POLLS = 30
 
 
-@router.get("/pipeline-runs/{run_id}/events")
+@router.get("/pipeline-runs/{run_id}/events", response_model=None)
 def stream_pipeline_events(
     run_id: str,
     session: DbSession,
     since: int = Query(default=0, ge=0),
-) -> StreamingResponse:
-    """Stream persisted run events; `since` replays events after that sequence."""
+    event_format: Literal["sse", "json"] = Query(default="sse", alias="format"),
+    limit: int = Query(default=2000, ge=1, le=2000),
+) -> StreamingResponse | list[dict[str, Any]]:
+    """Stream persisted run events, or return a redacted JSON log snapshot."""
     _run_or_404(session, run_id)
+    if event_format == "json":
+        return [
+            pipeline_events.log_event_dict(row)
+            for row in pipeline_events.list_events(session, run_id, since=since, limit=limit)
+        ]
     return StreamingResponse(
         _event_stream(run_id, since),
         media_type="text/event-stream",
@@ -406,6 +533,74 @@ def get_pipeline_report(
     )
 
 
+@router.post("/pipeline-runs/{run_id}/report/preview")
+def preview_pipeline_report(
+    run_id: str,
+    payload: ReportRegenerate,
+    session: DbSession,
+) -> Response:
+    run = _run_or_404(session, run_id)
+    normalized_outline = _normalized_outline(payload.outline)
+    normalized_custom_sections = _normalized_custom_sections(
+        payload.custom_sections,
+        normalized_outline,
+    )
+    steps = list_steps(session, run.id)
+    working_id = str(run.options.get("working_dataset_id") or run.dataset_id)
+    dataset = session.get(Dataset, working_id)
+    if dataset is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "dataset_not_found", "message": "working dataset was not found"},
+        )
+    prior = {item.key: item.output_json for item in steps if item.status == "succeeded"}
+    requested_ids = payload.chart_selection_ids
+    if requested_ids is None:
+        stored_ids = run.options.get("chart_selection_ids")
+        requested_ids = stored_ids if isinstance(stored_ids, list) else None
+    if requested_ids is not None:
+        selections = _resolve_report_selections(
+            session,
+            run,
+            [str(item) for item in requested_ids],
+        )
+    else:
+        selection_id = (prior.get("selection") or {}).get("selection_id")
+        legacy = (
+            session.get(ChartSelection, str(selection_id)) if selection_id is not None else None
+        )
+        selections = [legacy] if legacy is not None else []
+    selection = selections[0] if selections else None
+    chart_note = (
+        "Chart image is rendered during export."
+        if payload.include_chart and selection is not None
+        else None
+    )
+    markdown = report_service.build_report(
+        dataset,
+        run,
+        prior,
+        selection,
+        steps,
+        language=payload.language,
+        template=payload.template,
+        conclusion=payload.conclusion,
+        chart_image=None,
+        chart_note=chart_note,
+        outline=normalized_outline,
+        chart_selections=selections,
+        custom_sections=normalized_custom_sections,
+    )
+    return Response(
+        content=report_service.build_report_html(
+            markdown,
+            language=payload.language,
+        ),
+        media_type="text/html; charset=utf-8",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @router.post("/pipeline-runs/{run_id}/report")
 def regenerate_pipeline_report(
     run_id: str,
@@ -413,6 +608,11 @@ def regenerate_pipeline_report(
     session: DbSession,
 ) -> dict[str, Any]:
     run = _run_or_404(session, run_id)
+    normalized_outline = _normalized_outline(payload.outline)
+    normalized_custom_sections = _normalized_custom_sections(
+        payload.custom_sections,
+        normalized_outline,
+    )
     bundle = _regenerate_report(
         session,
         run,
@@ -420,7 +620,9 @@ def regenerate_pipeline_report(
         template=payload.template,
         conclusion=payload.conclusion,
         include_chart=payload.include_chart,
-        outline=_normalized_outline(payload.outline),
+        outline=normalized_outline,
+        chart_selection_ids=payload.chart_selection_ids,
+        custom_sections=normalized_custom_sections,
     )
     audit.record_event(
         session,
@@ -432,7 +634,9 @@ def regenerate_pipeline_report(
             "language": payload.language,
             "template": payload.template,
             "include_chart": payload.include_chart,
-            "outline": _normalized_outline(payload.outline),
+            "outline": normalized_outline,
+            "custom_sections": bundle["manifest"]["custom_sections"],
+            "chart_selection_ids": payload.chart_selection_ids,
         },
     )
     return {

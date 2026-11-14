@@ -2,20 +2,25 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 
+import { createReportExport } from '../api/exportJobs'
 import {
   DEFAULT_REPORT_OUTLINE,
   getPipelineRun,
   getReportManifest,
-  getReportMarkdown,
   regeneratePipelineReport,
   reportDownloadUrl,
   reportPackageUrl,
   type PipelineRun,
+  type ReportCustomSection,
   type ReportManifest,
+  type ReportRegenerateInput,
   type ReportSection,
 } from '../api/pipelines'
 import { errorMessage } from '../api/projects'
+import { ExportQueue } from '../components/ExportQueue'
+import { ReportCustomSections } from '../components/ReportCustomSections'
 import { ReportOutline } from '../components/ReportOutline'
+import { ReportPreview } from '../components/ReportPreview'
 
 export function P07Reports() {
   const { t } = useTranslation()
@@ -31,7 +36,8 @@ export function P07Reports() {
   const [conclusion, setConclusion] = useState('')
   const [includeChart, setIncludeChart] = useState(true)
   const [includeDerived, setIncludeDerived] = useState(false)
-  const [markdown, setMarkdown] = useState('')
+  const [customSections, setCustomSections] = useState<ReportCustomSection[]>([])
+  const [queueRefresh, setQueueRefresh] = useState(0)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -40,7 +46,6 @@ export function P07Reports() {
     if (!runId) {
       setRun(null)
       setManifest(null)
-      setMarkdown('')
       return
     }
     let cancelled = false
@@ -56,7 +61,7 @@ export function P07Reports() {
         setOutline(report.outline?.length ? report.outline : DEFAULT_REPORT_OUTLINE)
         setLanguage(report.language ?? 'zh')
         setTemplate(report.template ?? 'standard')
-        setMarkdown(await getReportMarkdown(runId))
+        setCustomSections(report.custom_sections ?? [])
       })
       .catch((caught: unknown) => {
         if (!cancelled) setError(errorMessage(caught))
@@ -69,21 +74,39 @@ export function P07Reports() {
     }
   }, [runId])
 
+  const draft: ReportRegenerateInput = {
+    language,
+    template,
+    conclusion: conclusion.trim() || null,
+    include_chart: includeChart,
+    outline,
+    chart_selection_ids: manifest?.chart_selection_ids,
+    custom_sections: customSections,
+  }
+
   async function regenerate() {
     if (!runId) return
     setBusy(true)
     setError(null)
     try {
-      const result = await regeneratePipelineReport(runId, {
-        language,
-        template,
-        conclusion: conclusion.trim() || null,
-        include_chart: includeChart,
-        outline,
-      })
+      const result = await regeneratePipelineReport(runId, draft)
       const report = result.report.manifest as ReportManifest
       setManifest(report)
-      setMarkdown(await getReportMarkdown(runId))
+      setCustomSections(report.custom_sections ?? customSections)
+    } catch (caught) {
+      setError(errorMessage(caught))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function queueExport(format: 'html' | 'pdf') {
+    if (!runId) return
+    setBusy(true)
+    setError(null)
+    try {
+      await createReportExport(runId, format)
+      setQueueRefresh((value) => value + 1)
     } catch (caught) {
       setError(errorMessage(caught))
     } finally {
@@ -135,6 +158,11 @@ export function P07Reports() {
             </div>
           </div>
           <ReportOutline value={outline} onChange={setOutline} disabled={busy} />
+          <ReportCustomSections
+            value={customSections}
+            onChange={setCustomSections}
+            disabled={busy}
+          />
         </aside>
 
         <section className="card" aria-label={t('reportPage.preview')}>
@@ -142,11 +170,7 @@ export function P07Reports() {
             <h2>{t('reportPage.preview')}</h2>
             <span className="badge">{template}</span>
           </div>
-          {markdown ? (
-            <pre className="report-preview">{markdown}</pre>
-          ) : (
-            <p className="muted">{t('reportPage.noReport')}</p>
-          )}
+          <ReportPreview runId={runId} draft={draft} />
           {manifest ? (
             <details className="chart-dependent-details">
               <summary>{t('reportPage.manifest')}</summary>
@@ -155,6 +179,36 @@ export function P07Reports() {
               </pre>
             </details>
           ) : null}
+        </section>
+
+        <section
+          className="card"
+          data-testid="report-chart-list"
+          aria-label={t('reportPage.charts')}
+        >
+          <h2>{t('reportPage.charts')}</h2>
+          {manifest?.chart_selection_ids?.length ? (
+            <ol className="report-chart-list">
+              {manifest.chart_selection_ids.map((selectionId, index) => {
+                const lineage = manifest.chart_lineage?.find(
+                  (item) => item.selection_id === selectionId,
+                )
+                return (
+                  <li key={`${selectionId}-${index}`}>
+                    <strong>{lineage?.chart_id ?? selectionId}</strong> · {selectionId}
+                    {lineage?.parent_selection_id ? (
+                      <span className="muted">
+                        {' '}
+                        · {t('reportPage.parentSelection')}: {lineage.parent_selection_id}
+                      </span>
+                    ) : null}
+                  </li>
+                )
+              })}
+            </ol>
+          ) : (
+            <p className="muted">{t('reportPage.emptyCharts')}</p>
+          )}
         </section>
 
         <aside className="card" aria-label={t('reportPage.settings')}>
@@ -220,6 +274,24 @@ export function P07Reports() {
           </div>
 
           <div className="inline-form">
+            <button
+              className="btn"
+              type="button"
+              onClick={() => void queueExport('html')}
+              disabled={busy}
+            >
+              {t('reportPage.queue.queueHtml')}
+            </button>
+            <button
+              className="btn"
+              type="button"
+              onClick={() => void queueExport('pdf')}
+              disabled={busy}
+            >
+              {t('reportPage.queue.queuePdf')}
+            </button>
+          </div>
+          <div className="inline-form">
             <a className="btn" href={reportDownloadUrl(runId, 'md')}>
               {t('reportPage.downloadMd')}
             </a>
@@ -241,6 +313,8 @@ export function P07Reports() {
           </div>
           <p className="muted">{t('reportPage.packageHint')}</p>
         </aside>
+
+        <ExportQueue projectId={projectId} runId={runId} refreshKey={queueRefresh} />
       </div>
     </section>
   )

@@ -1,6 +1,9 @@
+import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Route, Routes } from 'react-router-dom'
+import { Route, Routes, useNavigate } from 'react-router-dom'
 
+import { listProjects } from '../api/projects'
+import { getSettings } from '../api/settings'
 import { P01Home } from '../pages/P01Home'
 import { P02Import } from '../pages/P02Import'
 import { P03Data } from '../pages/P03Data'
@@ -12,6 +15,29 @@ import { P08Providers } from '../pages/P08Providers'
 import { P09Trace } from '../pages/P09Trace'
 import { P10Settings } from '../pages/P10Settings'
 import { AppShell } from './AppShell'
+
+function StartupRedirect() {
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([getSettings(), listProjects()])
+      .then(([settings, projects]) => {
+        if (cancelled) return
+        if (settings.startup_behavior?.value !== 'last_project') return
+        const target = projects[0]
+        if (target) {
+          navigate(`/projects/${target.id}/import`, { replace: true })
+        }
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [navigate])
+
+  return <P01Home />
+}
 
 function NotFound() {
   const { t } = useTranslation()
@@ -28,7 +54,7 @@ export function AppRoutes() {
   return (
     <Routes>
       <Route element={<AppShell />}>
-        <Route index element={<P01Home />} />
+        <Route index element={<StartupRedirect />} />
         <Route path="projects/:projectId/import" element={<P02Import />} />
         <Route path="projects/:projectId/data" element={<P03Data />} />
         <Route path="projects/:projectId/pipeline" element={<P04Pipeline />} />

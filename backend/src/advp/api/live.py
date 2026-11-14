@@ -30,6 +30,23 @@ def _raise_live(exc: live_service.LiveError) -> NoReturn:
     )
 
 
+def apply_field_mapping(
+    records: list[dict[str, Any]],
+    field_mapping: dict[str, str | None] | None,
+) -> list[dict[str, Any]]:
+    """Apply a select/rename/exclude mapping to live records."""
+    if not field_mapping:
+        return records
+    mapped: list[dict[str, Any]] = []
+    for record in records:
+        row: dict[str, Any] = {}
+        for source, target in field_mapping.items():
+            if target and source in record:
+                row[target] = record[source]
+        mapped.append(row)
+    return mapped
+
+
 @router.post("", response_model=LiveSessionResponse)
 def create_live_session(payload: LiveSessionCreate) -> dict[str, Any]:
     try:
@@ -129,6 +146,7 @@ def save_live_snapshot(
         {key: value for key, value in record.items() if not key.startswith("_")}
         for record in snapshot["records"]
     ]
+    records = apply_field_mapping(records, payload.field_mapping)
     if not records:
         raise HTTPException(
             status_code=409,

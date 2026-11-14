@@ -100,6 +100,15 @@ def union_frames(sources: list[SourceFrame]) -> pl.DataFrame:
     return pl.concat(tagged, how="diagonal_relaxed")
 
 
+def _suffixed_name(name: str, suffix: str, existing: set[str]) -> str:
+    candidate = f"{name}{suffix}"
+    index = 2
+    while candidate in existing:
+        candidate = f"{name}{suffix}_{index}"
+        index += 1
+    return candidate
+
+
 def join_frames(
     left: pl.DataFrame,
     right: pl.DataFrame,
@@ -108,11 +117,24 @@ def join_frames(
     right_key: str,
     how: JoinHow,
 ) -> pl.DataFrame:
-    """Join two frames on their keys with a `_right` suffix for conflicts."""
+    """Join two frames and give both sides of every conflict a suffixed name."""
     if how not in JOIN_HOWS:
         raise MultiFileModeError(f"unsupported join type: {how}")
     _require_key(left, left_key, "left")
     _require_key(right, right_key, "right")
+    conflicts = (set(left.columns) & set(right.columns)) - {left_key, right_key}
+    if conflicts:
+        left_names = set(left.columns)
+        right_names = set(right.columns)
+        left_rename: dict[str, str] = {}
+        right_rename: dict[str, str] = {}
+        for column in sorted(conflicts):
+            left_rename[column] = _suffixed_name(column, "_left", left_names)
+            left_names.add(left_rename[column])
+            right_rename[column] = _suffixed_name(column, "_right", right_names)
+            right_names.add(right_rename[column])
+        left = left.rename(left_rename)
+        right = right.rename(right_rename)
     return left.join(
         right,
         left_on=left_key,

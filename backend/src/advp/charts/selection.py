@@ -40,7 +40,9 @@ from advp.charts.selector import (
     select_array_candidates,
     select_table_candidates,
 )
+from advp.config import get_settings
 from advp.costs import check_budget
+from advp.eu2_settings import runtime_setting
 from advp.llm import credentials
 from advp.llm import providers as provider_service
 from advp.llm.client import ProviderError
@@ -72,6 +74,7 @@ class _SelectionState:
     attempts: int = 0
     reselects: int = 0
     usage: _UsageTotals = field(default_factory=_UsageTotals)
+    provider_costs: dict[str, float] = field(default_factory=dict)
     last_error: str | None = None
 
 
@@ -81,11 +84,13 @@ def create_chart_selection(
     *,
     intent: ChartIntent | None = None,
     provider_id: str | None = None,
-    max_reselects: int = MAX_RESELECTS,
+    max_reselects: int | None = None,
     transport: httpx.BaseTransport | None = None,
     run_id: str | None = None,
 ) -> ChartSelection:
     """Run AI selection with provider failover, scoring, and rule fallback."""
+    if max_reselects is None:
+        max_reselects = int(runtime_setting(get_settings(), "max_reselects"))
     state = _prepare_state(dataset, intent)
     budget = check_budget(session, dataset.project_id).to_dict()
     if budget["exceeded"]:
@@ -115,59 +120,75 @@ def create_chart_selection(
             "mode": provider.egress_mode,
             "sample_rows": provider.sample_rows,
         }
-        while True:
-            state.attempts += 1
-            messages = build_selection_messages(
-                context_payload=_egress_context(state.context_payload, provider, dataset),
-                candidates=state.candidates_payload,
-                intent=intent,
-                feedback=feedback,
-            )
-            try:
-                structured = complete_structured_for_provider(
-                    session,
-                    provider,
-                    messages,
-                    SelectionOutput,
-                    operation="chart_selection",
-                    temperature=0.0,
-                    max_tokens=1200,
-                    repair_attempts=1,
-                    transport=transport,
-                    project_id=dataset.project_id,
-                    run_id=run_id,
-                    tag="reselect" if state.reselects else "initial",
+        if provider_service.task_budget_exceeded(
+            provider, state.provider_costs.get(provider.id, 0.0)
+        ):
+            state.last_error = f"{provider.name}: task_budget_exceeded"
+            continue
+        if not provider_service.acquire_provider_slot(provider):
+            state.last_error = f"{provider.name}: provider_concurrency_timeout"
+            continue
+        try:
+            while True:
+                state.attempts += 1
+                messages = build_selection_messages(
+                    context_payload=_egress_context(state.context_payload, provider, dataset),
+                    candidates=state.candidates_payload,
+                    intent=intent,
+                    feedback=feedback,
                 )
-            except (ProviderError, StructuredOutputError, credentials.CredentialError) as exc:
-                if isinstance(exc, StructuredOutputError):
-                    _add_usage(state.usage, provider, exc.usages)
-                state.last_error = f"{provider.name}: {exc}"
-                break
-            _add_usage(state.usage, provider, structured.usages)
-            try:
-                output = validate_selection(
-                    structured.data,
-                    _candidate_list(state),
-                    state.context,
-                )
-            except SelectionValidationError as exc:
-                state.last_error = f"{provider.name}: {exc}"
-                break
+                try:
+                    structured = complete_structured_for_provider(
+                        session,
+                        provider,
+                        messages,
+                        SelectionOutput,
+                        operation="chart_selection",
+                        temperature=0.0,
+                        max_tokens=1200,
+                        repair_attempts=1,
+                        transport=transport,
+                        project_id=dataset.project_id,
+                        run_id=run_id,
+                        tag="reselect" if state.reselects else "initial",
+                    )
+                except (ProviderError, StructuredOutputError, credentials.CredentialError) as exc:
+                    if isinstance(exc, StructuredOutputError):
+                        _add_usage(state, provider, exc.usages)
+                    state.last_error = f"{provider.name}: {exc}"
+                    break
+                _add_usage(state, provider, structured.usages)
+                if provider_service.task_budget_exceeded(
+                    provider, state.provider_costs.get(provider.id, 0.0)
+                ):
+                    state.last_error = f"{provider.name}: task_budget_exceeded"
+                    break
+                try:
+                    output = validate_selection(
+                        structured.data,
+                        _candidate_list(state),
+                        state.context,
+                    )
+                except SelectionValidationError as exc:
+                    state.last_error = f"{provider.name}: {exc}"
+                    break
 
-            if needs_reselection(state.scored) and state.reselects < limit:
-                state.reselects += 1
-                feedback = _reselect_feedback(state.scored, output)
-                continue
-            return _persist_success(
-                session,
-                dataset,
-                state,
-                provider,
-                output,
-                intent,
-                needs_confirmation=needs_reselection(state.scored),
-                budget=budget,
-            )
+                if needs_reselection(state.scored) and state.reselects < limit:
+                    state.reselects += 1
+                    feedback = _reselect_feedback(state.scored, output)
+                    continue
+                return _persist_success(
+                    session,
+                    dataset,
+                    state,
+                    provider,
+                    output,
+                    intent,
+                    needs_confirmation=needs_reselection(state.scored),
+                    budget=budget,
+                )
+        finally:
+            provider_service.release_provider_slot(provider)
 
     return _persist_degraded(
         session,
@@ -219,68 +240,88 @@ def correct_chart_selection(
     previous = parent.result_json or {}
     last_error: str | None = None
     for provider in providers:
-        state.attempts += 1
         state.context_payload["egress"] = {
             "mode": provider.egress_mode,
             "sample_rows": provider.sample_rows,
         }
-        messages = build_correction_messages(
-            context_payload=_egress_context(state.context_payload, provider, dataset),
-            candidates=state.candidates_payload,
-            intent=intent,
-            previous=previous,
-            instruction=instruction,
-        )
+        if provider_service.task_budget_exceeded(
+            provider, state.provider_costs.get(provider.id, 0.0)
+        ):
+            last_error = f"{provider.name}: task_budget_exceeded"
+            continue
+        if not provider_service.acquire_provider_slot(provider):
+            last_error = f"{provider.name}: provider_concurrency_timeout"
+            continue
         try:
-            structured = complete_structured_for_provider(
+            state.attempts += 1
+            messages = build_correction_messages(
+                context_payload=_egress_context(state.context_payload, provider, dataset),
+                candidates=state.candidates_payload,
+                intent=intent,
+                previous=previous,
+                instruction=instruction,
+            )
+            try:
+                structured = complete_structured_for_provider(
+                    session,
+                    provider,
+                    messages,
+                    SelectionOutput,
+                    operation="chart_correction",
+                    temperature=0.0,
+                    max_tokens=1200,
+                    repair_attempts=1,
+                    transport=transport,
+                    project_id=dataset.project_id,
+                    run_id=run_id,
+                    tag="correction",
+                )
+            except (ProviderError, StructuredOutputError, credentials.CredentialError) as exc:
+                if isinstance(exc, StructuredOutputError):
+                    _add_usage(state, provider, exc.usages)
+                last_error = f"{provider.name}: {exc}"
+                continue
+            _add_usage(state, provider, structured.usages)
+            if provider_service.task_budget_exceeded(
+                provider, state.provider_costs.get(provider.id, 0.0)
+            ):
+                last_error = f"{provider.name}: task_budget_exceeded"
+                continue
+            try:
+                output = validate_selection(
+                    structured.data,
+                    _candidate_list(state),
+                    state.context,
+                )
+            except SelectionValidationError as exc:
+                last_error = f"{provider.name}: {exc}"
+                continue
+            winner = next(
+                (
+                    item
+                    for item in state.scored
+                    if item.candidate.spec.id == output.selected.chart_id
+                ),
+                None,
+            )
+            if winner is None:
+                last_error = f"{provider.name}: selected chart is not in the candidate set"
+                continue
+            return _persist_success(
                 session,
+                dataset,
+                state,
                 provider,
-                messages,
-                SelectionOutput,
-                operation="chart_correction",
-                temperature=0.0,
-                max_tokens=1200,
-                repair_attempts=1,
-                transport=transport,
-                project_id=dataset.project_id,
-                run_id=run_id,
-                tag="correction",
+                output,
+                intent,
+                needs_confirmation=needs_reselection([winner]),
+                budget=budget,
+                winner=winner,
+                parent_selection_id=parent.id,
+                correction_instruction=instruction,
             )
-        except (ProviderError, StructuredOutputError, credentials.CredentialError) as exc:
-            if isinstance(exc, StructuredOutputError):
-                _add_usage(state.usage, provider, exc.usages)
-            last_error = f"{provider.name}: {exc}"
-            continue
-        _add_usage(state.usage, provider, structured.usages)
-        try:
-            output = validate_selection(
-                structured.data,
-                _candidate_list(state),
-                state.context,
-            )
-        except SelectionValidationError as exc:
-            last_error = f"{provider.name}: {exc}"
-            continue
-        winner = next(
-            (item for item in state.scored if item.candidate.spec.id == output.selected.chart_id),
-            None,
-        )
-        if winner is None:
-            last_error = f"{provider.name}: selected chart is not in the candidate set"
-            continue
-        return _persist_success(
-            session,
-            dataset,
-            state,
-            provider,
-            output,
-            intent,
-            needs_confirmation=needs_reselection([winner]),
-            budget=budget,
-            winner=winner,
-            parent_selection_id=parent.id,
-            correction_instruction=instruction,
-        )
+        finally:
+            provider_service.release_provider_slot(provider)
     raise ChartSelectionError(
         "correction_failed",
         last_error or "all providers failed",
@@ -404,21 +445,24 @@ def _ordered_providers(session: Session, provider_id: str | None) -> list[Provid
 
 
 def _add_usage(
-    totals: _UsageTotals,
+    state: _SelectionState,
     provider: Provider,
     usages: list[Any],
 ) -> None:
+    totals = state.usage
     totals.currency = provider.currency
     for usage in usages:
-        totals.input_tokens += usage.input_tokens
-        totals.output_tokens += usage.output_tokens
-        totals.cached_tokens += usage.cached_tokens
-        totals.estimated_cost += estimate_cost(
+        cost = estimate_cost(
             usage.input_tokens,
             usage.output_tokens,
             provider.input_price_per_million,
             provider.output_price_per_million,
         )
+        totals.input_tokens += usage.input_tokens
+        totals.output_tokens += usage.output_tokens
+        totals.cached_tokens += usage.cached_tokens
+        totals.estimated_cost += cost
+        state.provider_costs[provider.id] = state.provider_costs.get(provider.id, 0.0) + cost
 
 
 def _reselect_feedback(scored: list[ScoredCandidate], output: SelectionOutput) -> str:

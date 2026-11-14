@@ -6,11 +6,12 @@ const TERMINAL = new Set(['succeeded', 'failed', 'cancelled'])
 
 type ImportProgressProps = {
   job: ImportJobDetail
+  label?: string
   onCancel: () => void
   onRetry: () => void
 }
 
-export function ImportProgress({ job, onCancel, onRetry }: ImportProgressProps) {
+export function ImportProgress({ job, label, onCancel, onRetry }: ImportProgressProps) {
   const { t } = useTranslation()
   const percent = Math.round(Math.min(1, Math.max(0, job.progress)) * 100)
   const stageLabel = t(`importPage.progress.stage.${job.stage}`, {
@@ -19,8 +20,13 @@ export function ImportProgress({ job, onCancel, onRetry }: ImportProgressProps) 
   const finished = TERMINAL.has(job.status)
 
   return (
-    <section className="card import-progress" aria-live="polite">
+    <section
+      className="card import-progress"
+      aria-live="polite"
+      data-testid={`import-job-${job.id}`}
+    >
       <h2>{t('importPage.progress.title')}</h2>
+      {label ? <p className="muted import-progress-file">{label}</p> : null}
       <div className="progress-track">
         <div
           className="progress-fill"

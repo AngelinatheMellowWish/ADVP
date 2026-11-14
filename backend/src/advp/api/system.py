@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 import logging
+import platform
+import sys
+from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
-from advp import audit, lifecycle
+from advp import __version__, audit, lifecycle
 from advp.api.deps import DbSession
 from advp.read_only import is_read_only
 
 router = APIRouter(prefix="/system", tags=["system"])
+ROOT = Path(__file__).resolve().parents[4]
 
 
 class ActiveTasksResponse(BaseModel):
@@ -36,6 +42,57 @@ class ShutdownRequest(BaseModel):
 class ShutdownResponse(BaseModel):
     status: str
     active_tasks: ActiveTasksResponse
+
+
+class AboutResponse(BaseModel):
+    version: str
+    python: str
+    platform: str
+    license: str
+    repository: dict[str, str | None]
+
+
+def _bundled_text(names: tuple[str, ...], fallback: str) -> str:
+    roots = [ROOT, *ROOT.parents[:2], Path.cwd(), Path(sys.executable).resolve().parent]
+    for root in roots:
+        parts: list[str] = []
+        for name in names:
+            path = root / name
+            if path.is_file():
+                parts.append(path.read_text(encoding="utf-8"))
+        if parts:
+            return "\n\n".join(parts)
+    return fallback
+
+
+@router.get("/about", response_model=AboutResponse)
+def about() -> dict[str, Any]:
+    """Return sanitized version and runtime information for the About panel."""
+    return {
+        "version": __version__,
+        "python": platform.python_version(),
+        "platform": platform.platform(),
+        "license": "Apache-2.0",
+        "repository": {"label": "ADVP", "url": None},
+    }
+
+
+@router.get("/license", response_class=PlainTextResponse)
+def license_text() -> str:
+    """Return the bundled license and NOTICE text."""
+    return _bundled_text(
+        ("LICENSE", "NOTICE"),
+        "Apache-2.0\n\nADVP is distributed under the Apache License 2.0.",
+    )
+
+
+@router.get("/third-party", response_class=PlainTextResponse)
+def third_party_text() -> str:
+    """Return the bundled third-party notices."""
+    return _bundled_text(
+        ("THIRD_PARTY_NOTICES.md",),
+        "Third-party notices are bundled with the ADVP release package.",
+    )
 
 
 @router.get("/lifecycle", response_model=LifecycleResponse)

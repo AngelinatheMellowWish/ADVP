@@ -1,5 +1,5 @@
 import type { CleanStep } from './cleaning'
-import { request, type ChartIntent } from './projects'
+import { request, requestText, type ChartIntent } from './projects'
 
 export type PipelineStep = {
   id: string
@@ -75,6 +75,14 @@ export const DEFAULT_REPORT_OUTLINE: ReportSection[] = [
   'conclusion',
 ]
 
+export type ReportChartLineage = {
+  selection_id: string
+  dataset_id: string
+  chart_id: string
+  parent_selection_id: string | null
+  source?: string
+}
+
 export type ReportManifest = {
   app_version: string
   generated_at: string
@@ -84,11 +92,22 @@ export type ReportManifest = {
   dataset_name: string
   source_sha256: string
   chart_id: string | null
+  chart_selection_ids?: string[]
+  chart_lineage?: ReportChartLineage[]
   language: 'zh' | 'en'
   template: 'standard' | 'compact'
   outline: ReportSection[]
+  custom_sections?: ReportCustomSection[]
   files: Record<string, string | null>
   trace_url: string
+}
+
+export type ReportCustomSection = {
+  key: string
+  title: string
+  body: string
+  position: number
+  include_charts: boolean
 }
 
 export type ReportRegenerateInput = {
@@ -97,6 +116,8 @@ export type ReportRegenerateInput = {
   conclusion?: string | null
   include_chart?: boolean
   outline?: ReportSection[]
+  chart_selection_ids?: string[]
+  custom_sections?: ReportCustomSection[]
 }
 
 export type ReportRegenerateResponse = {
@@ -136,6 +157,17 @@ export async function regeneratePipelineReport(
 ): Promise<ReportRegenerateResponse> {
   return request<ReportRegenerateResponse>(`/api/pipeline-runs/${runId}/report`, {
     method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function previewPipelineReport(
+  runId: string,
+  input: ReportRegenerateInput,
+): Promise<string> {
+  return requestText(`/api/pipeline-runs/${runId}/report/preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   })
 }

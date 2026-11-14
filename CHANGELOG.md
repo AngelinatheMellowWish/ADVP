@@ -12,6 +12,175 @@ record. `VERSION`, this file, and the release tag must always agree. See
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-14
+
+### Added
+
+- P02: real database/remote/web/live sources, editable document facts with opt-in AI enhancement,
+  remembered SQL connections, type-override warning/null coercion, live field rename/exclude,
+  per-file import progress, and `_left`/`_right` join conflict columns.
+- P03: missing/correlation/distribution charts, read-only AI context preview, 1k/10k/100k/full
+  masked CSV export, profile overrides, quality report text, and impact previews.
+- P04/P05/P06: independent budget/degradation card, safe calculated fields with numeric/string/date
+  functions and derived lineage, seven-dimension scoring card, add-to-report, and the unified
+  3D toolbar.
+- P07: backend HTML draft preview, custom report sections with chart embedding, persisted report/chart
+  export queue with retry/download, and a browser E2E.
+- P08: provider concurrency and wait timeout, per-provider task budget, cost preview with 7-day
+  averages, priority drag, status badges, and separate provider/database credential clearing.
+- P09: cost timeline by step/model, persisted run-event log filters, audit search/export (JSON+CSV),
+  and redacted diagnostic copy.
+- P10: category cleanup API (imports/derived/logs/search index/cache) with dry-run, protected
+  referenced data, explicit referenced-upload opt-in, and audit; settings reset with ENV
+  provenance; new startup/reselection/concurrency/pipeline/sandbox/log settings; sanitized
+  about/license/third-party endpoints; developer and license panels.
+- Visual, accessibility, bilingual, and four-width regression checks with a P01–P10 parity matrix.
+
+### Changed
+
+- ADVP 2.1 installer keeps the 2.0 AppId and install directory so it upgrades 2.0 in place;
+  portable package follows the 1.0/2.0 `ADVP-2.1.0-win64` layout.
+
+### Known limits
+
+- Installer remains unsigned; SmartScreen warnings are expected.
+- P03 Parquet sample export remains disabled with `parquet_export_unavailable`.
+- Real 3D rendering still requires `ADVP_RENDER_PYTHON`; otherwise real tests skip.
+- PostgreSQL/MySQL/S3/Kafka acceptance requires configured endpoints; otherwise skipped with
+  replacement checks.
+
+## [2.0.684] - 2026-11-14
+
+### Changed
+
+- test(eu21): close P08 and P09
+
+## [2.0.631] - 2026-11-14
+
+### Changed
+
+- feat(eu21): add trace cost logs and audit search
+
+## [2.0.579] - 2026-11-14
+
+### Changed
+
+- feat(eu21): add provider concurrency task budget and credential controls
+
+## [2.0.538] - 2026-11-05
+
+### Changed
+
+- feat(eu21): render report preview and export queue
+
+## [2.0.501] - 2026-11-05
+
+### Changed
+
+- feat(eu21): add P03 export rows and P05 numeric functions
+
+## [2.0.469] - 2026-11-05
+
+### Changed
+
+- feat(eu21): complete P02 credential and import refinements
+
+## [2.0.433] - 2026-11-05
+
+### Changed
+
+- feat(eu21): add P02 backend credential and import refinements
+
+## [2.0.405] - 2026-11-05
+
+### Changed
+
+- docs(eu21): refine 2.1 requirements and add increment tasks
+
+## [2.0.384] - 2026-11-04
+
+### Changed
+
+- feat(eu21): add report custom sections
+
+## [2.0.359] - 2026-11-04
+
+### Changed
+
+- feat(eu21): align P04 P05 P06 controls
+
+## [2.0.323] - 2026-11-04
+
+### Changed
+
+- feat(eu21): add calculated fields and scoring card
+
+## [2.0.293] - 2026-11-04
+
+### Changed
+
+- feat(eu21): align P01 home
+
+## [2.0.267] - 2026-11-04
+
+### Changed
+
+- feat(eu21): align P03 table quality and profile overrides
+
+## [2.0.235] - 2026-11-04
+
+### Changed
+
+- feat(eu21): add P03 analysis charts and AI context
+
+## [2.0.208] - 2026-11-04
+
+### Changed
+
+- test(eu21): close P02 sources
+
+## [2.0.182] - 2026-11-04
+
+### Changed
+
+- feat(eu21): complete P02 document editing and AI enhancement
+
+## [2.0.156] - 2026-11-04
+
+### Changed
+
+- feat(eu21): add P02 live stream source
+
+## [2.0.131] - 2026-11-04
+
+### Changed
+
+- feat(eu21): add P02 web source
+
+## [2.0.103] - 2026-11-04
+
+### Changed
+
+- feat(eu21): add P02 remote and S3 sources
+
+## [2.0.73] - 2026-11-04
+
+### Changed
+
+- feat(eu21): wire P02 database import
+
+## [2.0.48] - 2026-11-04
+
+### Changed
+
+- feat(eu21): add P02 advanced file options
+
+## [2.0.21] - 2026-11-04
+
+### Changed
+
+- docs(eu21): confirm 2.1 plan and decisions
+
 ## [2.0.0] - 2026-11-02
 
 ### Changed

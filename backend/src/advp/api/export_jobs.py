@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, NoReturn
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from fastapi.responses import FileResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from advp import export_jobs
@@ -98,6 +100,36 @@ def create_selection_export(
         _raise_job(exc)
     background_tasks.add_task(export_jobs.run_job, row.id)
     return export_jobs.job_dict(row)
+
+
+@router.get("/export-jobs")
+def list_export_jobs(
+    session: DbSession,
+    project_id: str | None = None,
+    run_id: str | None = None,
+    kind: str | None = Query(default=None, pattern="^(report|selection)$"),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    cutoff = datetime.now(UTC) - timedelta(days=30)
+    statement = (
+        select(ExportJob)
+        .where(ExportJob.created_at >= cutoff)
+        .order_by(ExportJob.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    if project_id is not None:
+        statement = statement.where(ExportJob.project_id == project_id)
+    if run_id is not None:
+        statement = statement.where(
+            ExportJob.target_id == run_id,
+            ExportJob.kind == "report",
+        )
+    if kind is not None:
+        statement = statement.where(ExportJob.kind == kind)
+    rows = list(session.scalars(statement).all())
+    return {"jobs": [export_jobs.job_dict(row) for row in rows]}
 
 
 @router.get("/export-jobs/{job_id}")

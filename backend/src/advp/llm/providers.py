@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import uuid
 
 import httpx
@@ -22,6 +23,9 @@ DEFAULT_BASE_URLS = {
     "openai": "https://api.openai.com/v1",
     "anthropic": "https://api.anthropic.com/v1",
 }
+
+_SLOT_LOCK = threading.Lock()
+_PROVIDER_SLOTS: dict[str, tuple[threading.BoundedSemaphore, int]] = {}
 
 
 def create_provider(session: Session, payload: ProviderCreate) -> Provider:
@@ -44,6 +48,9 @@ def create_provider(session: Session, payload: ProviderCreate) -> Provider:
         output_price_per_million=payload.output_price_per_million,
         currency=payload.currency,
         priority=payload.priority,
+        max_concurrency=payload.max_concurrency,
+        concurrency_wait_seconds=payload.concurrency_wait_seconds,
+        task_budget=payload.task_budget,
         is_default=payload.is_default,
         egress_mode=payload.egress_mode,
         sample_rows=payload.sample_rows,
@@ -113,6 +120,12 @@ def update_provider(session: Session, provider: Provider, payload: ProviderUpdat
         provider.currency = payload.currency
     if payload.priority is not None:
         provider.priority = payload.priority
+    if payload.max_concurrency is not None:
+        provider.max_concurrency = payload.max_concurrency
+    if payload.concurrency_wait_seconds is not None:
+        provider.concurrency_wait_seconds = payload.concurrency_wait_seconds
+    if payload.task_budget is not None:
+        provider.task_budget = payload.task_budget
     if payload.egress_mode is not None:
         provider.egress_mode = payload.egress_mode
     if payload.sample_rows is not None:
@@ -150,6 +163,49 @@ def delete_provider(session: Session, provider: Provider) -> None:
     credentials.delete_secret(provider.id)
     session.delete(provider)
     session.commit()
+
+
+def clear_provider_credentials(session: Session) -> int:
+    """Remove every provider secret while keeping provider configuration."""
+    providers = list(session.scalars(select(Provider)).all())
+    for provider in providers:
+        credentials.delete_secret(provider.id)
+        provider.has_key = False
+        provider.key_last4 = None
+        provider.header_names = []
+    session.commit()
+    return len(providers)
+
+
+def provider_slot(provider: Provider) -> threading.BoundedSemaphore:
+    """Return the process-local concurrency slot for one provider."""
+    limit = max(1, min(int(provider.max_concurrency or 1), 16))
+    with _SLOT_LOCK:
+        entry = _PROVIDER_SLOTS.get(provider.id)
+        if entry is None or entry[1] != limit:
+            entry = (threading.BoundedSemaphore(limit), limit)
+            _PROVIDER_SLOTS[provider.id] = entry
+        return entry[0]
+
+
+def acquire_provider_slot(provider: Provider) -> bool:
+    """Acquire one provider slot, waiting up to the configured threshold."""
+    wait_seconds = max(1, min(int(provider.concurrency_wait_seconds or 30), 120))
+    return provider_slot(provider).acquire(timeout=float(wait_seconds))
+
+
+def release_provider_slot(provider: Provider) -> None:
+    """Release a provider slot; ignore duplicate releases."""
+    try:
+        provider_slot(provider).release()
+    except ValueError:
+        return
+
+
+def task_budget_exceeded(provider: Provider, spent: float) -> bool:
+    """Return True when one provider's task budget has been reached."""
+    budget = float(provider.task_budget or 0.0)
+    return budget > 0.0 and spent >= budget
 
 
 def build_client(

@@ -20,6 +20,12 @@ from advp.models import ChartSelection, Dataset, PipelineRun, PipelineStep
 
 LANGUAGES = {"zh", "en"}
 TEMPLATES = {"standard", "compact"}
+MANIFEST_SCHEMA_VERSION = 1
+CUSTOM_SECTION_FIELDS = {"key", "title", "body", "position", "include_charts"}
+_MAX_CUSTOM_SECTIONS = 20
+_MAX_CUSTOM_TITLE = 200
+_MAX_CUSTOM_BODY = 50_000
+_CUSTOM_KEY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 DEFAULT_OUTLINE = [
     "overview",
     "quality",
@@ -64,6 +70,7 @@ TEXT: dict[str, dict[str, str]] = {
         "geo": "地理范围",
         "array": "数组",
         "chart": "图表选型",
+        "chart_selection_ids": "报告图表清单",
         "no_selection": "暂无选型结果。",
         "fields": "字段",
         "aggregation": "聚合",
@@ -132,6 +139,7 @@ TEXT: dict[str, dict[str, str]] = {
         "geo": "Geographic range",
         "array": "Array",
         "chart": "Chart selection",
+        "chart_selection_ids": "Report chart list",
         "no_selection": "No selection result.",
         "fields": "Fields",
         "aggregation": "Aggregation",
@@ -192,6 +200,74 @@ def normalize_outline(outline: list[str] | None) -> list[str]:
     return ordered or list(DEFAULT_OUTLINE)
 
 
+def normalize_custom_sections(
+    custom_sections: list[dict[str, Any]] | None,
+    *,
+    section_count: int | None = None,
+) -> list[dict[str, Any]]:
+    """Validate custom report sections and return a normalized copy."""
+    if custom_sections is None:
+        return []
+    if not isinstance(custom_sections, list):
+        raise ValueError("custom_sections must be a list")
+    if len(custom_sections) > _MAX_CUSTOM_SECTIONS:
+        raise ValueError(f"at most {_MAX_CUSTOM_SECTIONS} custom sections are allowed")
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in custom_sections:
+        if not isinstance(raw, dict):
+            raise ValueError("each custom section must be an object")
+        unknown = sorted(set(raw) - CUSTOM_SECTION_FIELDS)
+        if unknown:
+            raise ValueError(f"unknown custom section field: {unknown[0]}")
+        raw_key = raw.get("key")
+        if not isinstance(raw_key, str):
+            raise ValueError("custom section key is required")
+        key = raw_key.strip()
+        if not _CUSTOM_KEY_PATTERN.match(key):
+            raise ValueError(f"invalid custom section key: {raw_key!r}")
+        if key in REPORT_SECTIONS:
+            raise ValueError(f"custom section key is reserved: {key}")
+        if key in seen:
+            raise ValueError(f"duplicate custom section key: {key}")
+        title = raw.get("title")
+        if not isinstance(title, str) or not title.strip():
+            raise ValueError("custom section title is required")
+        title = title.strip()
+        if len(title) > _MAX_CUSTOM_TITLE:
+            raise ValueError(f"custom section title is too long: {key}")
+        body = raw.get("body", "")
+        if body is None:
+            body = ""
+        if not isinstance(body, str):
+            raise ValueError(f"custom section body must be Markdown text: {key}")
+        if len(body) > _MAX_CUSTOM_BODY:
+            raise ValueError(f"custom section body is too long: {key}")
+        position = raw.get("position")
+        if isinstance(position, bool) or not isinstance(position, int):
+            raise ValueError(f"custom section position must be an integer: {key}")
+        if position < 0:
+            raise ValueError(f"custom section position must be non-negative: {key}")
+        include_charts = raw.get("include_charts", False)
+        if not isinstance(include_charts, bool):
+            raise ValueError(f"custom section include_charts must be a boolean: {key}")
+        seen.add(key)
+        normalized.append(
+            {
+                "key": key,
+                "title": title,
+                "body": body,
+                "position": position,
+                "include_charts": include_charts,
+            }
+        )
+    if section_count is not None:
+        for item in normalized:
+            if int(item["position"]) > section_count:
+                raise ValueError(f"custom section position is out of range: {item['key']}")
+    return normalized
+
+
 def report_directory(run: PipelineRun) -> Path:
     """Return the report output directory for a run."""
     directory = get_settings().workspace_dir / "exports" / run.project_id
@@ -212,10 +288,19 @@ def write_report_bundle(
     chart_image: Path | None = None,
     chart_note: str | None = None,
     outline: list[str] | None = None,
+    chart_selections: list[ChartSelection] | None = None,
+    custom_sections: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Write Markdown, HTML, and manifest files and return their paths and sizes."""
     normalized_outline = normalize_outline(outline)
+    normalized_custom_sections = normalize_custom_sections(
+        custom_sections,
+        section_count=len(normalized_outline),
+    )
     directory = report_directory(run)
+    effective_selections = (
+        chart_selections if chart_selections is not None else ([selection] if selection else [])
+    )
     markdown = build_report(
         dataset,
         run,
@@ -228,6 +313,8 @@ def write_report_bundle(
         chart_image=chart_image.name if chart_image else None,
         chart_note=chart_note,
         outline=normalized_outline,
+        chart_selections=effective_selections,
+        custom_sections=normalized_custom_sections,
     )
     md_path = directory / f"report_{run.id}.md"
     html_path = directory / f"report_{run.id}.html"
@@ -236,6 +323,7 @@ def write_report_bundle(
     result = (selection.result_json or {}) if selection else {}
     selected = result.get("selected") or {}
     manifest = {
+        "manifest_schema_version": MANIFEST_SCHEMA_VERSION,
         "app_version": __version__,
         "generated_at": datetime.now(UTC).isoformat(),
         "run_id": run.id,
@@ -251,12 +339,17 @@ def write_report_bundle(
         "language": language,
         "template": template,
         "outline": normalized_outline,
+        "custom_sections": normalized_custom_sections,
+        "chart_selection_ids": [item.id for item in effective_selections],
+        "chart_lineage": [_chart_lineage(item) for item in effective_selections],
         "custom_conclusion": bool(conclusion and conclusion.strip()),
         "parameters": {
             "report_language": language,
             "report_template": template,
             "report_outline": normalized_outline,
+            "report_custom_sections": normalized_custom_sections,
             "report_include_chart": chart_image is not None,
+            "report_chart_selection_ids": [item.id for item in effective_selections],
         },
         "files": {
             "markdown": md_path.name,
@@ -328,6 +421,13 @@ def build_reproducible_package(
     prior = {step.key: step.output_json for step in steps if step.status == "succeeded"}
     language = str(run.options.get("report_language") or "zh")
     template = str(run.options.get("report_template") or "standard")
+    stored_custom = run.options.get("custom_sections")
+    if not isinstance(stored_custom, list):
+        stored_custom = run.options.get("report_custom_sections")
+    normalized_custom_sections = normalize_custom_sections(
+        stored_custom if isinstance(stored_custom, list) else None,
+        section_count=len(normalized_outline),
+    )
     directory = report_directory(run)
     script = _build_run_script(dataset, run, selection, normalized_outline)
     notebook = _build_notebook(script)
@@ -346,6 +446,7 @@ def build_reproducible_package(
             language=language,
             template=template,
             outline=normalized_outline,
+            custom_sections=normalized_custom_sections,
         )
     files: dict[str, str | bytes] = {
         "run.py": script,
@@ -367,6 +468,7 @@ def build_reproducible_package(
             files[name] = content
             derived_files.append(name)
     manifest = {
+        "manifest_schema_version": MANIFEST_SCHEMA_VERSION,
         "app_version": __version__,
         "generated_at": datetime.now(UTC).isoformat(),
         "run_id": run.id,
@@ -379,6 +481,7 @@ def build_reproducible_package(
         "language": language,
         "template": template,
         "outline": normalized_outline,
+        "custom_sections": normalized_custom_sections,
         "includes_raw_data": False,
         "includes_derived": include_derived,
         "files": sorted([*files, "manifest.json"]),
@@ -515,6 +618,18 @@ def _derived_payload(dataset: Dataset) -> dict[str, bytes]:
     return payload
 
 
+def _chart_lineage(selection: ChartSelection) -> dict[str, Any]:
+    result = selection.result_json or {}
+    selected = result.get("selected") or {}
+    return {
+        "selection_id": selection.id,
+        "dataset_id": selection.dataset_id,
+        "chart_id": selected.get("chart_id") or selection.selected_chart_id,
+        "parent_selection_id": selection.parent_selection_id,
+        "source": selection.source,
+    }
+
+
 def build_report(
     dataset: Dataset,
     run: PipelineRun,
@@ -528,9 +643,15 @@ def build_report(
     chart_image: str | None = None,
     chart_note: str | None = None,
     outline: list[str] | None = None,
+    chart_selections: list[ChartSelection] | None = None,
+    custom_sections: list[dict[str, Any]] | None = None,
 ) -> str:
     """Build a Markdown report with profile, analysis, selection, and lineage."""
     normalized_outline = normalize_outline(outline)
+    normalized_custom_sections = normalize_custom_sections(
+        custom_sections,
+        section_count=len(normalized_outline),
+    )
     lang = language if language in LANGUAGES else "zh"
     mode = template if template in TEMPLATES else "standard"
     text = TEXT[lang]
@@ -602,6 +723,17 @@ def build_report(
             ]
         )
     lines.extend(_selection_lines(selected, top3, lang, text, compact=mode == "compact"))
+    ordered = (
+        chart_selections if chart_selections is not None else ([selection] if selection else [])
+    )
+    if ordered:
+        lines.extend(
+            [
+                "",
+                f"- {text['chart_selection_ids']}："
+                + ", ".join(f"`{item.id}`" for item in ordered),
+            ]
+        )
     lines.extend(
         [
             "",
@@ -647,7 +779,57 @@ def build_report(
     lines.append("")
     if normalized_outline != DEFAULT_OUTLINE:
         lines = _reorder_sections(lines, normalized_outline)
+    lines = _insert_custom_sections(lines, normalized_custom_sections, text, ordered)
     return "\n".join(lines)
+
+
+def _insert_custom_sections(
+    lines: list[str],
+    custom_sections: list[dict[str, Any]],
+    text: dict[str, str],
+    selections: list[ChartSelection],
+) -> list[str]:
+    """Insert custom Markdown sections at their requested positions."""
+    if not custom_sections:
+        return lines
+    preamble: list[str] = []
+    blocks: list[list[str]] = []
+    current: list[str] | None = None
+    for line in lines:
+        if line.startswith("## ") and not re.match(r"^## \d+\.\d+ ", line):
+            current = [line]
+            blocks.append(current)
+        elif current is None:
+            preamble.append(line)
+        else:
+            current.append(line)
+    inserted: list[dict[str, Any]] = []
+    for item in sorted(custom_sections, key=lambda entry: int(entry["position"])):
+        position = int(item["position"])
+        shift = sum(1 for prior in inserted if int(prior["position"]) <= position)
+        index = min(position + shift, len(blocks))
+        blocks.insert(index, _custom_section_block(item, text, selections))
+        inserted.append(item)
+    return [*preamble, *(line for block in blocks for line in block)]
+
+
+def _custom_section_block(
+    item: dict[str, Any],
+    text: dict[str, str],
+    selections: list[ChartSelection],
+) -> list[str]:
+    lines = ["", f"## {_md(str(item['title']))}", ""]
+    body = str(item.get("body") or "").strip()
+    if body:
+        lines.extend(body.splitlines())
+        lines.append("")
+    if item.get("include_charts") and selections:
+        lines.append(
+            f"- {text['chart_selection_ids']}："
+            + ", ".join(f"`{selection.id}`" for selection in selections)
+        )
+        lines.append("")
+    return lines
 
 
 def _reorder_sections(lines: list[str], outline: list[str]) -> list[str]:

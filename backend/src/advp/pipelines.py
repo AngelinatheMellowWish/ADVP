@@ -28,7 +28,9 @@ from advp.charts.selector import (
     select_array_candidates,
     select_table_candidates,
 )
+from advp.config import get_settings
 from advp.db import get_session
+from advp.eu2_settings import runtime_setting
 from advp.models import Dataset, PipelineRun, PipelineStep
 
 logger = logging.getLogger("advp.pipeline")
@@ -70,16 +72,20 @@ def create_run(
     options: dict[str, Any] | None = None,
 ) -> PipelineRun:
     """Create a pending run and its ordered steps."""
+    run_options = dict(options or {})
+    resolved = _pipeline_step_options(run_options)
+    run_options["pipeline_steps"] = resolved
     run = PipelineRun(
         id=uuid.uuid4().hex,
         dataset_id=dataset.id,
         project_id=dataset.project_id,
         status="pending",
-        options=options or {},
+        options=run_options,
     )
     session.add(run)
     session.flush()
     for position, (key, name) in enumerate(STEP_DEFINITIONS):
+        enabled = resolved.get(key, True)
         session.add(
             PipelineStep(
                 id=uuid.uuid4().hex,
@@ -87,13 +93,29 @@ def create_run(
                 key=key,
                 name=name,
                 position=position,
-                status="pending",
+                status="pending" if enabled else "skipped",
                 placeholder=key in PLACEHOLDER_STEPS,
             )
         )
     session.commit()
     session.refresh(run)
     return run
+
+
+def _pipeline_step_options(options: dict[str, Any]) -> dict[str, bool]:
+    """Resolve optional step defaults; explicit request values win."""
+    defaults = runtime_setting(get_settings(), "default_pipeline_options") or {}
+    explicit = options.get("pipeline_steps")
+    requested = explicit if isinstance(explicit, dict) else {}
+    resolved: dict[str, bool] = {}
+    for key in ("clean", "analyze", "report"):
+        if key in requested:
+            resolved[key] = bool(requested[key])
+        else:
+            resolved[key] = bool(defaults.get(key, True))
+    if options.get("clean_steps"):
+        resolved["clean"] = True
+    return resolved
 
 
 def get_run(session: Session, run_id: str) -> PipelineRun | None:
@@ -597,12 +619,13 @@ def _selection_step(
     prior: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     provider_id = run.options.get("provider_id")
+    reselects = run.options.get("max_reselects")
     row = selection_service.create_chart_selection(
         session,
         dataset,
         intent=_intent(run),
         provider_id=provider_id,
-        max_reselects=int(run.options.get("max_reselects", 2)),
+        max_reselects=int(reselects) if reselects is not None else None,
         run_id=run.id,
     )
     result = row.result_json
@@ -658,6 +681,10 @@ def _report_step(
     template = str(run.options.get("report_template") or "standard")
     conclusion = run.options.get("report_conclusion")
     include_chart = bool(run.options.get("report_include_chart", False))
+    custom_sections = run.options.get("report_custom_sections")
+    if not isinstance(custom_sections, list):
+        stored_custom = run.options.get("custom_sections")
+        custom_sections = stored_custom if isinstance(stored_custom, list) else []
     chart_image = None
     chart_error = None
     if include_chart and selection is not None:
@@ -677,6 +704,7 @@ def _report_step(
         conclusion=str(conclusion) if conclusion else None,
         chart_image=chart_image,
         chart_note=chart_error,
+        custom_sections=custom_sections,
     )
     return {
         "placeholder": False,
@@ -690,6 +718,8 @@ def _report_step(
         "html_bytes": bundle["html_bytes"],
         "language": language,
         "template": template,
+        "custom_sections": bundle["manifest"]["custom_sections"],
+        "manifest_schema_version": bundle["manifest"]["manifest_schema_version"],
         "summary": "Markdown/HTML report with profile, analysis, selection, lineage, and cost.",
     }
 

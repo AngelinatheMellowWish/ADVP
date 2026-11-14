@@ -273,10 +273,16 @@ def _apply_windows_limits(process: subprocess.Popen[str], timeout: float) -> int
                 ("PeakJobMemoryUsed", ctypes.c_size_t),
             ]
 
+        settings = get_settings()
+        cpu_seconds = min(
+            float(timeout),
+            float(runtime_setting(settings, "sandbox_max_cpu_seconds")),
+        )
+        memory_mb = int(runtime_setting(settings, "sandbox_max_memory_mb"))
         info = ExtendedLimits()
         info.BasicLimitInformation.LimitFlags = 0x2 | 0x100 | 0x2000
-        info.BasicLimitInformation.PerProcessUserTimeLimit = int(timeout * 10_000_000)
-        info.ProcessMemoryLimit = 1024 * 1024 * 1024
+        info.BasicLimitInformation.PerProcessUserTimeLimit = int(cpu_seconds * 10_000_000)
+        info.ProcessMemoryLimit = memory_mb * 1024 * 1024
         if not kernel32.SetInformationJobObject(
             job,
             9,

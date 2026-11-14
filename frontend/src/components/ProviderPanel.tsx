@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { errorMessage } from '../api/projects'
+import { clearSavedSqlCredentials, errorMessage } from '../api/projects'
 import {
+  clearProviderCredentials,
   createProvider,
   deleteProvider,
+  getProviderUsageSummary,
   listProviderModels,
   listProviderUsage,
   listProviders,
@@ -15,6 +17,7 @@ import {
   type ProviderKind,
   type ProviderTestResult,
   type ProviderUsage,
+  type ProviderUsageSummary,
 } from '../api/providers'
 
 type FormState = {
@@ -33,6 +36,9 @@ type FormState = {
   output_price: string
   currency: string
   priority: string
+  max_concurrency: string
+  concurrency_wait_seconds: string
+  task_budget: string
   is_default: boolean
   egress_mode: EgressMode
   sample_rows: string
@@ -98,6 +104,9 @@ const EMPTY_FORM: FormState = {
   output_price: '0',
   currency: 'USD',
   priority: '100',
+  max_concurrency: '2',
+  concurrency_wait_seconds: '30',
+  task_budget: '2',
   is_default: false,
   egress_mode: 'sample',
   sample_rows: '3',
@@ -124,6 +133,9 @@ function providerToForm(provider: Provider): FormState {
     output_price: String(provider.output_price_per_million),
     currency: provider.currency,
     priority: String(provider.priority),
+    max_concurrency: String(provider.max_concurrency ?? 2),
+    concurrency_wait_seconds: String(provider.concurrency_wait_seconds ?? 30),
+    task_budget: String(provider.task_budget ?? 2),
     is_default: provider.is_default,
     egress_mode: provider.egress_mode ?? 'sample',
     sample_rows: String(provider.sample_rows ?? 3),
@@ -156,8 +168,32 @@ export function ProviderPanel() {
   const [testResult, setTestResult] = useState<ProviderTestResult | null>(null)
   const [models, setModels] = useState<string[]>([])
   const [usage, setUsage] = useState<ProviderUsage[]>([])
+  const [usageSummary, setUsageSummary] = useState<ProviderUsageSummary | null>(null)
+  const [previewInputTokens, setPreviewInputTokens] = useState('0')
+  const [previewOutputTokens, setPreviewOutputTokens] = useState('0')
+  const [draggedId, setDraggedId] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   const selected = providers.find((provider) => provider.id === selectedId) ?? null
+
+  const applySummary = useCallback((summary: ProviderUsageSummary) => {
+    setUsageSummary(summary)
+    setPreviewInputTokens(String(Math.round(Number(summary.average_input_tokens ?? 0))))
+    setPreviewOutputTokens(String(Math.round(Number(summary.average_output_tokens ?? 0))))
+  }, [])
+
+  const loadSummary = useCallback(
+    async (providerId: string) => {
+      try {
+        applySummary(await getProviderUsageSummary(providerId))
+      } catch {
+        setUsageSummary(null)
+        setPreviewInputTokens('0')
+        setPreviewOutputTokens('0')
+      }
+    },
+    [applySummary],
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -168,6 +204,7 @@ export function ProviderPanel() {
         if (items.length > 0) {
           setSelectedId(items[0].id)
           setForm(providerToForm(items[0]))
+          void loadSummary(items[0].id)
         }
       })
       .catch((err: unknown) => {
@@ -179,7 +216,7 @@ export function ProviderPanel() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [loadSummary])
 
   async function refresh(nextId?: string) {
     const items = await listProviders()
@@ -188,9 +225,13 @@ export function ProviderPanel() {
     if (target) {
       setSelectedId(target.id)
       setForm(providerToForm(target))
+      void loadSummary(target.id)
     } else {
       setSelectedId(null)
       setForm(EMPTY_FORM)
+      setUsageSummary(null)
+      setPreviewInputTokens('0')
+      setPreviewOutputTokens('0')
     }
   }
 
@@ -200,7 +241,9 @@ export function ProviderPanel() {
     setTestResult(null)
     setModels([])
     setUsage([])
+    setNotice(null)
     setError(null)
+    void loadSummary(provider.id)
   }
 
   function startCreate() {
@@ -209,6 +252,10 @@ export function ProviderPanel() {
     setTestResult(null)
     setModels([])
     setUsage([])
+    setUsageSummary(null)
+    setPreviewInputTokens('0')
+    setPreviewOutputTokens('0')
+    setNotice(null)
     setError(null)
   }
 
@@ -266,6 +313,9 @@ export function ProviderPanel() {
         output_price_per_million: Number(form.output_price),
         currency: form.currency.trim() || 'USD',
         priority: Number(form.priority),
+        max_concurrency: Number(form.max_concurrency),
+        concurrency_wait_seconds: Number(form.concurrency_wait_seconds),
+        task_budget: Number(form.task_budget),
         is_default: form.is_default,
         egress_mode: form.egress_mode,
         sample_rows: Number(form.sample_rows),
@@ -342,6 +392,71 @@ export function ProviderPanel() {
     }
   }
 
+  async function handleDrop(targetId: string) {
+    if (!draggedId || draggedId === targetId) {
+      setDraggedId(null)
+      return
+    }
+    const ordered = [...providers]
+    const from = ordered.findIndex((provider) => provider.id === draggedId)
+    const to = ordered.findIndex((provider) => provider.id === targetId)
+    if (from < 0 || to < 0) {
+      setDraggedId(null)
+      return
+    }
+    const [moved] = ordered.splice(from, 1)
+    ordered.splice(to, 0, moved)
+    setProviders(ordered)
+    setDraggedId(null)
+    setBusy(true)
+    setError(null)
+    try {
+      await Promise.all(
+        ordered.map((provider, index) =>
+          updateProvider(provider.id, { priority: index * 10 }),
+        ),
+      )
+      await refresh()
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function clearProviderKeys() {
+    if (!window.confirm(t('providersPage.controls.confirmClearProviderKeys'))) return
+    setBusy(true)
+    setError(null)
+    try {
+      await clearProviderCredentials()
+      setNotice(t('providersPage.controls.cleared'))
+      await refresh()
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function clearDatabaseCredentials() {
+    if (!window.confirm(t('providersPage.controls.confirmClearDatabaseCredentials'))) return
+    setBusy(true)
+    setError(null)
+    try {
+      await clearSavedSqlCredentials()
+      setNotice(t('providersPage.controls.cleared'))
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const previewCost =
+    (Number(previewInputTokens || 0) / 1_000_000) * Number(form.input_price || 0) +
+    (Number(previewOutputTokens || 0) / 1_000_000) * Number(form.output_price || 0)
+
   return (
     <section className="panel provider-panel" aria-label="Provider 设置" data-testid="provider-panel">
       <div className="panel-title">
@@ -367,15 +482,35 @@ export function ProviderPanel() {
             <li key={provider.id}>
               <button
                 className={`list-button ${provider.id === selectedId ? 'active' : ''}`}
+                data-testid={`provider-item-${provider.id}`}
+                draggable={!busy}
                 onClick={() => selectProvider(provider)}
+                onDragStart={() => setDraggedId(provider.id)}
+                onDragEnd={() => setDraggedId(null)}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault()
+                  void handleDrop(provider.id)
+                }}
                 disabled={busy}
+                title={t('providersPage.controls.dragHint')}
               >
                 <span>
                   {provider.name}
                   {provider.is_default ? ' · 默认' : ''}
                 </span>
                 <span className="muted">
-                  {provider.kind} · {provider.model} · {provider.has_key ? `****${provider.key_last4 ?? ''}` : '无密钥'}
+                  {provider.kind} · {provider.model} ·{' '}
+                  {provider.has_key ? `****${provider.key_last4 ?? ''}` : '无密钥'}
+                </span>
+                <span
+                  className={`badge ${provider.has_key ? 'ok' : 'warn'}`}
+                  data-testid={`provider-status-${provider.id}`}
+                >
+                  {t('providersPage.controls.status')}:{' '}
+                  {provider.has_key
+                    ? t('providersPage.controls.configured')
+                    : t('providersPage.controls.missingKey')}
                 </span>
               </button>
             </li>
@@ -494,6 +629,77 @@ export function ProviderPanel() {
                   {t('providersPage.egress.confirmFull')}
                 </label>
               ) : null}
+            </fieldset>
+
+            <fieldset className="provider-controls">
+              <legend>{t('providersPage.controls.title')}</legend>
+              <label>
+                {t('providersPage.controls.maxConcurrency')}
+                <input
+                  className="input"
+                  type="number"
+                  min="1"
+                  max="16"
+                  value={form.max_concurrency}
+                  onChange={(event) => updateField('max_concurrency', event.target.value)}
+                />
+              </label>
+              <label>
+                {t('providersPage.controls.concurrencyWait')}
+                <input
+                  className="input"
+                  type="number"
+                  min="1"
+                  max="120"
+                  value={form.concurrency_wait_seconds}
+                  onChange={(event) =>
+                    updateField('concurrency_wait_seconds', event.target.value)
+                  }
+                />
+              </label>
+              <label>
+                {t('providersPage.controls.taskBudget')}
+                <input
+                  className="input"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.task_budget}
+                  onChange={(event) => updateField('task_budget', event.target.value)}
+                />
+              </label>
+              <div className="cost-preview" data-testid="provider-cost-preview">
+                <h5>{t('providersPage.controls.costPreview')}</h5>
+                <p className="muted" data-testid="provider-usage-average">
+                  {t('providersPage.controls.sevenDayAverage')}:{' '}
+                  {Math.round(Number(usageSummary?.average_input_tokens ?? 0))} /{' '}
+                  {Math.round(Number(usageSummary?.average_output_tokens ?? 0))} ·{' '}
+                  {usageSummary?.requests ?? 0}
+                </p>
+                <label>
+                  {t('providersPage.controls.previewInputTokens')}
+                  <input
+                    className="input"
+                    type="number"
+                    min="0"
+                    value={previewInputTokens}
+                    onChange={(event) => setPreviewInputTokens(event.target.value)}
+                  />
+                </label>
+                <label>
+                  {t('providersPage.controls.previewOutputTokens')}
+                  <input
+                    className="input"
+                    type="number"
+                    min="0"
+                    value={previewOutputTokens}
+                    onChange={(event) => setPreviewOutputTokens(event.target.value)}
+                  />
+                </label>
+                <p>
+                  {previewCost.toFixed(6)} {form.currency.trim() || 'USD'}
+                </p>
+              </div>
             </fieldset>
 
             <details className="advanced-options">
@@ -621,7 +827,19 @@ export function ProviderPanel() {
             <button className="button" onClick={remove} disabled={busy || !selectedId}>
               删除
             </button>
+            <button className="button" onClick={clearProviderKeys} disabled={busy}>
+              {t('providersPage.controls.clearProviderKeys')}
+            </button>
+            <button className="button" onClick={clearDatabaseCredentials} disabled={busy}>
+              {t('providersPage.controls.clearDatabaseCredentials')}
+            </button>
           </div>
+
+          {notice ? (
+            <p className="muted" role="status">
+              {notice}
+            </p>
+          ) : null}
 
           {testResult ? (
             <p className="muted" data-testid="provider-test-result">

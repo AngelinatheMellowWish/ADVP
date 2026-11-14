@@ -68,11 +68,19 @@ export type SchemaDefinition = {
 }
 
 export type ImportOptionsInput = {
+  encoding?: string
+  delimiter?: string
+  has_header?: boolean
+  sheet?: number | string
   variable?: string
   shape?: number[]
   dtype?: string
   byte_order?: string
   raw_offset?: number
+  sample_rows?: number
+  preview_rows?: number
+  missing_values?: string[]
+  type_overrides?: Record<string, string>
 }
 
 export type ProfileIssue = {
@@ -219,6 +227,23 @@ export type SqlConnectionResult = {
   label: string
 }
 
+export type SqlSavedConnection = {
+  id: string
+  name: string
+  dialect: string
+  database: string
+  host: string | null
+  username: string | null
+  label: string
+  has_password: boolean
+}
+
+export type SqlSavedConnectionInput = {
+  name: string
+  url: string
+  password?: string
+}
+
 export type SqlTableInfo = {
   name: string
   schema_name: string | null
@@ -321,6 +346,9 @@ export type WebTableInfo = {
 export type WebTablesResponse = {
   url: string
   format: string
+  source: 'static' | 'rendered'
+  elapsed_ms: number
+  warning: string | null
   tables: WebTableInfo[]
 }
 
@@ -328,6 +356,44 @@ export type StreamPreviewResponse = {
   records: Record<string, unknown>[]
   count: number
   source: string
+}
+
+export type CalculatedFieldPreview = {
+  source_dataset_id: string
+  expression: string
+  output_column: string
+  output_type: string
+  columns: ColumnDefinition[]
+  preview: Record<string, unknown>[]
+  rows: Record<string, unknown>[]
+  row_count: number
+  sampled: boolean
+}
+
+export type CalculatedFieldLineageEntry = {
+  operation: string
+  source_dataset_id: string
+  expression: string
+  output_column: string
+  created_at: string
+}
+
+export type CalculatedFieldResult = {
+  dataset: DatasetDetail
+  source_dataset_id: string
+  parent_dataset_id: string
+  expression: string
+  output_column: string
+  output_type: string
+  columns: ColumnDefinition[]
+  preview: Record<string, unknown>[]
+  lineage: CalculatedFieldLineageEntry[]
+}
+
+export type CalculatedFieldRemoveResult = {
+  removed_id: string
+  source_dataset_id: string
+  dataset: DatasetDetail
 }
 
 export class ApiError extends Error {
@@ -386,6 +452,60 @@ export async function requestForm<T>(path: string, body: FormData): Promise<T> {
     credentials: 'same-origin',
   })
   return parseResponse<T>(response)
+}
+
+export async function requestText(path: string, init?: RequestInit): Promise<string> {
+  await ensureSession()
+  const response = await fetch(path, {
+    credentials: 'same-origin',
+    ...init,
+  })
+  if (!response.ok) {
+    let detail: ErrorDetail | null = null
+    try {
+      const payload = (await response.json()) as { detail?: ErrorDetail }
+      detail = payload.detail ?? null
+    } catch {
+      detail = null
+    }
+    throw new ApiError(
+      detail?.message ?? `请求失败 (${response.status})`,
+      response.status,
+      detail?.code ?? 'api_error',
+      detail?.hint,
+    )
+  }
+  return response.text()
+}
+
+export async function requestBlob(path: string): Promise<Blob> {
+  await ensureSession()
+  const response = await fetch(path, { credentials: 'same-origin' })
+  if (!response.ok) {
+    let detail: ErrorDetail | null = null
+    try {
+      const payload = (await response.json()) as { detail?: ErrorDetail }
+      detail = payload.detail ?? null
+    } catch {
+      detail = null
+    }
+    throw new ApiError(
+      detail?.message ?? `请求失败 (${response.status})`,
+      response.status,
+      detail?.code ?? 'api_error',
+      detail?.hint,
+    )
+  }
+  return response.blob()
+}
+
+export async function exportSampleCsv(
+  datasetId: string,
+  rows: number | 'full',
+): Promise<Blob> {
+  const query =
+    rows === 'full' ? 'rows=1000000&full=true' : `rows=${encodeURIComponent(rows)}`
+  return requestBlob(`/api/datasets/${datasetId}/export/sample?${query}`)
 }
 
 async function parseResponse<T>(response: Response): Promise<T> {
@@ -513,9 +633,24 @@ export async function getPreview(
   )
 }
 
+export type ProfileOverrides = {
+  sensitive_columns: string[]
+  type_overrides: Record<string, string>
+}
+
 export async function reprofileDataset(datasetId: string): Promise<DatasetDetail> {
   return request<DatasetDetail>(`/api/datasets/${datasetId}/reprofile`, {
     method: 'POST',
+  })
+}
+
+export async function updateProfileOverrides(
+  datasetId: string,
+  overrides: ProfileOverrides,
+): Promise<DatasetDetail> {
+  return request<DatasetDetail>(`/api/datasets/${datasetId}/profile-overrides`, {
+    method: 'POST',
+    body: JSON.stringify(overrides),
   })
 }
 
@@ -530,6 +665,50 @@ export async function relocateDataset(
   })
 }
 
+export async function previewCalculatedField(
+  datasetId: string,
+  expression: string,
+  outputColumn?: string,
+): Promise<CalculatedFieldPreview> {
+  return request<CalculatedFieldPreview>(
+    `/api/datasets/${datasetId}/calculated-fields/preview`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        expression,
+        output_column: outputColumn || null,
+      }),
+    },
+  )
+}
+
+export async function createCalculatedField(
+  datasetId: string,
+  input: { name: string; expression: string; output_column?: string },
+): Promise<CalculatedFieldResult> {
+  return request<CalculatedFieldResult>(
+    `/api/datasets/${datasetId}/calculated-fields`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        name: input.name,
+        expression: input.expression,
+        output_column: input.output_column ?? input.name,
+      }),
+    },
+  )
+}
+
+export async function removeCalculatedField(
+  datasetId: string,
+  calculatedId: string,
+): Promise<CalculatedFieldRemoveResult> {
+  return request<CalculatedFieldRemoveResult>(
+    `/api/datasets/${datasetId}/calculated-fields/${calculatedId}`,
+    { method: 'DELETE' },
+  )
+}
+
 export async function getManifest(projectId: string): Promise<Record<string, unknown>> {
   return request<Record<string, unknown>>(`/api/projects/${projectId}/manifest`)
 }
@@ -538,6 +717,47 @@ export async function testSqlConnection(url: string): Promise<SqlConnectionResul
   return request<SqlConnectionResult>('/api/sql/test', {
     method: 'POST',
     body: JSON.stringify({ url }),
+  })
+}
+
+export async function listSqlConnections(): Promise<{
+  connections: SqlSavedConnection[]
+}> {
+  return request<{ connections: SqlSavedConnection[] }>('/api/sql/connections')
+}
+
+export async function saveSqlConnection(
+  input: SqlSavedConnectionInput,
+): Promise<SqlSavedConnection> {
+  return request<SqlSavedConnection>('/api/sql/connections', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function testSavedSqlConnection(
+  connectionId: string,
+): Promise<SqlConnectionResult> {
+  return request<SqlConnectionResult>(`/api/sql/connections/${connectionId}/test`, {
+    method: 'POST',
+  })
+}
+
+export async function forgetSavedSqlConnection(
+  connectionId: string,
+): Promise<SqlSavedConnection> {
+  return request<SqlSavedConnection>(`/api/sql/connections/${connectionId}/forget`, {
+    method: 'POST',
+  })
+}
+
+export async function deleteSavedSqlConnection(connectionId: string): Promise<void> {
+  await request<void>(`/api/sql/connections/${connectionId}`, { method: 'DELETE' })
+}
+
+export async function clearSavedSqlCredentials(): Promise<{ cleared: number }> {
+  return request<{ cleared: number }>('/api/sql/connections/credentials?confirm=true', {
+    method: 'DELETE',
   })
 }
 
@@ -588,18 +808,79 @@ export async function importSqlDataset(
   })
 }
 
+export type RemoteAuthInput = {
+  type: 'bearer' | 'basic' | 'header'
+  token?: string
+  username?: string
+  password?: string
+  header?: string
+  value?: string
+}
+
+export type RemoteImportInput = {
+  url: string
+  name?: string
+  filename?: string
+  headers?: Record<string, string>
+  auth?: RemoteAuthInput | null
+  timeout?: number
+}
+
+export type S3ImportInput = {
+  bucket: string
+  key: string
+  endpoint?: string
+  region?: string
+  accessKey?: string
+  secretKey?: string
+  name?: string
+  filename?: string
+}
+
 export async function importRemote(
   projectId: string,
-  url: string,
+  input: string | RemoteImportInput,
   name?: string,
   token?: string,
 ): Promise<DatasetDetail> {
+  const payload =
+    typeof input === 'string'
+      ? {
+          url: input,
+          name: name || null,
+          auth: token ? { type: 'bearer', token } : null,
+        }
+      : {
+          url: input.url,
+          name: input.name || null,
+          ...(input.filename ? { filename: input.filename } : {}),
+          ...(input.headers && Object.keys(input.headers).length > 0
+            ? { headers: input.headers }
+            : {}),
+          ...(input.auth ? { auth: input.auth } : {}),
+          ...(input.timeout !== undefined ? { timeout: input.timeout } : {}),
+        }
   return request<DatasetDetail>(`/api/projects/${projectId}/datasets/remote`, {
     method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function importS3(
+  projectId: string,
+  input: S3ImportInput,
+): Promise<DatasetDetail> {
+  return request<DatasetDetail>(`/api/projects/${projectId}/datasets/s3`, {
+    method: 'POST',
     body: JSON.stringify({
-      url,
-      name: name || null,
-      auth: token ? { type: 'bearer', token } : null,
+      endpoint: input.endpoint || null,
+      bucket: input.bucket,
+      key: input.key,
+      region: input.region || null,
+      access_key: input.accessKey || null,
+      secret_key: input.secretKey || null,
+      name: input.name || null,
+      ...(input.filename ? { filename: input.filename } : {}),
     }),
   })
 }

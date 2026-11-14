@@ -33,6 +33,8 @@ class ImportOptionsModel(BaseModel):
     raw_offset: int = Field(default=0, ge=0)
     sample_rows: int = Field(default=MAX_SAMPLE_ROWS, ge=1, le=MAX_SAMPLE_ROWS)
     preview_rows: int = Field(default=20, ge=1, le=MAX_PREVIEW_ROWS)
+    missing_values: list[str] | None = None
+    type_overrides: dict[str, str] | None = None
 
 
 class DatasetCreate(BaseModel):
@@ -44,6 +46,20 @@ class DatasetCreate(BaseModel):
 class RelocateRequest(BaseModel):
     path: str = Field(min_length=1)
     force: bool = False
+
+
+class ProfileOverridesRequest(BaseModel):
+    sensitive_columns: list[str] = Field(default_factory=list)
+    type_overrides: dict[str, str] = Field(default_factory=dict)
+
+
+class CalculatedFieldPreviewRequest(BaseModel):
+    expression: str = Field(min_length=1, max_length=2000)
+    output_column: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class CalculatedFieldRequest(CalculatedFieldPreviewRequest):
+    name: str = Field(default="calculated", min_length=1, max_length=200)
 
 
 class DocumentRequest(BaseModel):
@@ -235,6 +251,7 @@ class LiveSnapshotImportRequest(BaseModel):
     project_id: str = Field(min_length=1)
     name: str | None = Field(default=None, max_length=200)
     options: ImportOptionsModel = Field(default_factory=ImportOptionsModel)
+    field_mapping: dict[str, str | None] | None = None
 
 
 class LiveSessionResponse(BaseModel):
@@ -268,6 +285,9 @@ class WebTableInfo(BaseModel):
 class WebTablesResponse(BaseModel):
     url: str
     format: str
+    source: Literal["static", "rendered"] = "static"
+    elapsed_ms: int = 0
+    warning: str | None = None
     tables: list[WebTableInfo]
 
 
@@ -283,6 +303,7 @@ class RemoteImportRequest(BaseModel):
     filename: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)
     auth: RemoteAuth | None = None
+    timeout: float = Field(default=30.0, ge=1, le=300)
     options: ImportOptionsModel = Field(default_factory=ImportOptionsModel)
 
 
@@ -323,6 +344,27 @@ class SqlConnectionResponse(BaseModel):
     dialect: str
     database: str
     label: str
+
+
+class SqlSavedConnectionCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    url: str = Field(min_length=1)
+    password: SecretStr | None = None
+
+
+class SqlSavedConnectionInfo(BaseModel):
+    id: str
+    name: str
+    dialect: str
+    database: str
+    host: str | None
+    username: str | None
+    label: str
+    has_password: bool
+
+
+class SqlSavedConnectionsResponse(BaseModel):
+    connections: list[SqlSavedConnectionInfo]
 
 
 class SqlTableInfo(BaseModel):
@@ -541,6 +583,9 @@ class ProviderCreate(BaseModel):
     output_price_per_million: float = Field(default=0.0, ge=0)
     currency: str = Field(default="USD", min_length=1, max_length=10)
     priority: int = Field(default=100, ge=0)
+    max_concurrency: int = Field(default=2, ge=1, le=16)
+    concurrency_wait_seconds: int = Field(default=30, ge=1, le=120)
+    task_budget: float = Field(default=2.0, ge=0)
     is_default: bool = False
     egress_mode: Literal["metadata", "sample", "full"] = "sample"
     sample_rows: int = Field(default=3, ge=0, le=100)
@@ -566,6 +611,9 @@ class ProviderUpdate(BaseModel):
     output_price_per_million: float | None = Field(default=None, ge=0)
     currency: str | None = Field(default=None, min_length=1, max_length=10)
     priority: int | None = Field(default=None, ge=0)
+    max_concurrency: int | None = Field(default=None, ge=1, le=16)
+    concurrency_wait_seconds: int | None = Field(default=None, ge=1, le=120)
+    task_budget: float | None = Field(default=None, ge=0)
     is_default: bool | None = None
     egress_mode: Literal["metadata", "sample", "full"] | None = None
     sample_rows: int | None = Field(default=None, ge=0, le=100)
@@ -590,6 +638,9 @@ class ProviderSummary(BaseModel):
     output_price_per_million: float
     currency: str
     priority: int
+    max_concurrency: int
+    concurrency_wait_seconds: int
+    task_budget: float
     is_default: bool
     egress_mode: str
     sample_rows: int
@@ -612,10 +663,22 @@ class ProviderModelsResponse(BaseModel):
     latency_ms: float
 
 
+class ProviderUsageSummary(BaseModel):
+    provider_id: str
+    days: int
+    requests: int
+    input_tokens: int
+    output_tokens: int
+    cached_tokens: int
+    estimated_cost: float
+    average_input_tokens: float
+    average_output_tokens: float
+
+
 class ChartSelectionRequest(BaseModel):
     intent: ChartIntent | None = None
     provider_id: str | None = None
-    max_reselects: int = Field(default=2, ge=0, le=2)
+    max_reselects: int | None = Field(default=None, ge=0, le=2)
 
 
 class ChartCorrectionRequest(BaseModel):
@@ -808,13 +871,14 @@ class ChartSelectionSummary(BaseModel):
 class PipelineRunCreate(BaseModel):
     intent: ChartIntent | None = None
     provider_id: str | None = None
-    max_reselects: int = Field(default=2, ge=0, le=2)
+    max_reselects: int | None = Field(default=None, ge=0, le=2)
     clean_steps: list[CleanStep] = Field(default_factory=list)
     confirm_high_risk: bool = False
     report_language: str = Field(default="zh", pattern="^(zh|en)$")
     report_template: str = Field(default="standard", pattern="^(standard|compact)$")
     report_conclusion: str | None = None
     report_include_chart: bool = False
+    report_custom_sections: list[dict[str, Any]] | None = Field(default=None, max_length=20)
     auto_start: bool = True
 
 
@@ -824,6 +888,8 @@ class ReportRegenerate(BaseModel):
     conclusion: str | None = None
     include_chart: bool = True
     outline: list[str] | None = Field(default=None, max_length=20)
+    custom_sections: list[dict[str, Any]] | None = Field(default=None, max_length=20)
+    chart_selection_ids: list[str] | None = Field(default=None, max_length=50)
 
 
 class ExportJobCreate(BaseModel):
@@ -954,9 +1020,13 @@ class Eu2SettingsPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     language: Literal["zh", "en"] | None = None
+    startup_behavior: Literal["home", "last_project"] | None = None
     workspace: str | None = None
     analysis_sample_rows: int | None = Field(default=None, ge=1, le=100_000)
     render_sample_rows: int | None = Field(default=None, ge=1, le=100_000)
+    max_reselects: int | None = Field(default=None, ge=0, le=2)
+    analysis_concurrency: int | None = Field(default=None, ge=1, le=8)
+    default_pipeline_options: dict[str, bool] | None = None
     default_provider_id: str | None = None
     global_budget: float | None = Field(default=None, ge=0)
     monthly_budget: float | None = Field(default=None, ge=0)
@@ -964,6 +1034,10 @@ class Eu2SettingsPatch(BaseModel):
     search_sensitive: bool | None = None
     search_excluded_projects: list[str] | None = None
     sandbox_timeout_seconds: int | None = Field(default=None, ge=1, le=600)
+    sandbox_max_memory_mb: int | None = Field(default=None, ge=256, le=65_536)
+    sandbox_max_cpu_seconds: int | None = Field(default=None, ge=1, le=3_600)
+    log_retention_days: Literal[7, 14, 30] | None = None
+    log_level: Literal["INFO", "DEBUG", "WARN"] | None = None
     log_redaction: bool | None = None
     update_channel: Literal["stable", "beta"] | None = None
 
